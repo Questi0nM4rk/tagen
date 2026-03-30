@@ -1,5 +1,5 @@
 {
-  "name": "tagen",
+  "name": "@questi0nm4rk/tagen",
   "version": "1.0.0",
   "description": "Skill-graph CLI — assemble Claude Code plugins from tagged catalog cards",
   "keywords": [
