@@ -1,0 +1,81 @@
+dimensions:
+  phase:
+    description: "Where in the software development lifecycle does this skill apply?"
+    order: [planning, design, specification, implementation, testing, verification, review, documentation, operations]
+    values:
+      planning: "Requirements gathering, scoping, feature decomposition"
+      design: "Architecture decisions, system structure, patterns"
+      specification: "Formal specs — BDD scenarios, contracts, acceptance criteria"
+      implementation: "Writing production code, applying standards"
+      testing: "Test methodology, test-first workflows"
+      verification: "Quality gates, builds, security scans, cross-cutting checks"
+      review: "Code review, PR review processes"
+      documentation: "Knowledge capture, research, vault writing"
+      operations: "Deployment, monitoring, observability, configuration"
+
+  domain:
+    description: "What area of expertise does this skill cover?"
+    values:
+      architecture: "System structure, decomposition, integration patterns"
+      domain-modeling: "DDD tactical patterns — aggregates, value objects, domain events"
+      testing: "Test methodology — TDD, BDD, coverage strategies"
+      data-access: "Database, ORM, queries, migrations"
+      api: "REST endpoints, HTTP, OpenAPI, Minimal API"
+      validation: "Input validation rules and patterns"
+      diagnostics: "Memory analysis, performance profiling, risk scoring"
+      workflow: "Task management, plan orchestration, lifecycle"
+      knowledge-management: "Notes, research, vault writing, synthesis"
+      agent-design: "Agent harnesses, context engineering, loops, retrieval"
+      code-review: "Review rules, patterns, automation, scanner agents"
+      quality: "Skill quality, readability, standards enforcement"
+      tooling: "Setup, configuration, utilities, status display"
+      web-scraping: "Web scraping, HTTP testing, content extraction"
+      data-processing: "JSON/YAML/CSV transformation, format conversion"
+      database: "Database access, SQL queries, universal DB tooling"
+
+  language:
+    description: "Language or runtime specificity"
+    values:
+      agnostic: "Works for any language or runtime"
+      dotnet: ".NET / C# specific"
+      typescript: "TypeScript specific"
+      python: "Python specific"
+
+  layer:
+    description: "Abstraction level and role in skill composition"
+    order: [orchestrator, methodology, reference, standards, patterns, analysis, integration, utility]
+    values:
+      orchestrator: "Composes other skills, deploys agents in parallel"
+      methodology: "Teaches a process or workflow (language-agnostic HOW)"
+      reference: "Knowledge base, frameworks, research distillation"
+      standards: "Language-specific rules and conventions"
+      patterns: "Framework-specific architecture patterns"
+      analysis: "Inspection, diagnosis, validation, scoring"
+      integration: "Bridges to external systems (Jira, Obsidian, etc.)"
+      utility: "Setup, configuration, scaffolding"
+
+  concerns:
+    description: "Cross-cutting concerns addressed (use as array)"
+    values:
+      feature-decomposition: "Breaking features into components and tasks"
+      integration-analysis: "Dependencies, message patterns, contracts"
+      quality: "Code quality enforcement and measurement"
+      testing: "Test strategy, coverage, test-first workflows"
+      performance: "Memory, speed, scalability, allocation"
+      security: "Security scanning, vulnerability patterns"
+      error-handling: "Typed errors, Result patterns, exception strategies"
+      documentation: "Design docs, living docs, decision records"
+      code-generation: "Scaffolding, entity generation from schemas"
+      review-automation: "Automated review pipelines, scanner agents"
+      knowledge-capture: "Vault notes, research synthesis, TILs"
+      agent-orchestration: "Multi-agent coordination, parallel deployment"
+      context-management: "Context window, compaction, retrieval strategies"
+      task-management: "Jira integration, sprint planning, progress tracking"
+      standards-enforcement: "Framework and convention compliance"
+      plan-lifecycle: "Plan saving, phase splitting, worktree orchestration"
+      cli-tooling: "Wraps external CLI tool as a skill"
+      json-output: "Tools with structured JSON output for agent consumption"
+
+relationships:
+  composes: "This skill orchestrates or delegates to the listed skills"
+  enhances: "This skill adds value when combined with the listed skills"

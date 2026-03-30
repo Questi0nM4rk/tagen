@@ -1,0 +1,29 @@
+[
+  {
+    "fingerprint": "8c8551e3c33d0b595728b0171e76a6e9b9058196db878d001d4a8e825de8e2d5",
+    "rule": "biome/assist/source/organizeImports",
+    "linter": "biome",
+    "file": "features/steps/shared.ts",
+    "line": 5,
+    "message": "The imports and exports are not sorted.",
+    "capturedAt": "2026-03-30T23:04:33.116Z"
+  },
+  {
+    "fingerprint": "6aa6ff792bcd06c70838d231f38174508b7135142188bbcb0b51fa23a04591d0",
+    "rule": "codespell/spell",
+    "linter": "codespell",
+    "file": "__tests__/build-utils.test.ts",
+    "line": 1,
+    "message": "Spelling: afterAll ==> after all",
+    "capturedAt": "2026-03-30T23:04:33.116Z"
+  },
+  {
+    "fingerprint": "c91d658db306ce1392846f1e887450802d9734a9ffde3dc5214406fdb3c8dd97",
+    "rule": "codespell/spell",
+    "linter": "codespell",
+    "file": "__tests__/build-utils.test.ts",
+    "line": 28,
+    "message": "Spelling: afterAll ==> after all",
+    "capturedAt": "2026-03-30T23:04:33.116Z"
+  }
+]

@@ -1,0 +1,14 @@
+name: qsm-typescript-lang
+version: 1.0.0
+description: "TypeScript development patterns"
+author:
+  name: qsm
+keywords: [typescript, tdd, bdd]
+
+queries:
+  - tags:
+      language: typescript
+
+include: []
+exclude: []
+hooks: null

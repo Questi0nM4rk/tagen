@@ -1,0 +1,15 @@
+name: qsm-methodology
+version: 1.0.0
+description: "Agnostic methodology: TDD, BDD, DDD, verification"
+author:
+  name: qsm
+keywords: [tdd, bdd, methodology]
+
+queries:
+  - tags:
+      language: agnostic
+      domain: [testing]
+
+include: []
+exclude: []
+hooks: null

@@ -1,0 +1,44 @@
+{
+  "name": "tagen",
+  "version": "1.0.0",
+  "description": "Skill-graph CLI — assemble Claude Code plugins from tagged catalog cards",
+  "keywords": [
+    "claude-code",
+    "claude-plugins",
+    "skill-graph",
+    "plugin-builder",
+    "ai-workflow",
+    "claude",
+    "anthropic",
+    "markdown",
+    "yaml"
+  ],
+  "author": "Questi0nM4rk",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "tagen": "bin/tagen.js"
+  },
+  "files": [
+    "bin/tagen.js"
+  ],
+  "scripts": {
+    "build": "bun build src/main.ts --compile --outfile bin/tagen",
+    "build:npm": "bun build src/main.ts --target=bun --outfile bin/tagen.js && chmod +x bin/tagen.js",
+    "test": "bun test",
+    "typecheck": "tsgo --noEmit",
+    "lint": "biome check src/ __tests__/",
+    "lint:fix": "biome check --write src/ __tests__/",
+    "prepublishOnly": "bun run typecheck && bun test && bun run build:npm"
+  },
+  "dependencies": {
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
+    "@questi0nm4rk/feats": "^1.0.1",
+    "@typescript/native-preview": "latest",
+    "bun-types": "latest",
+    "typescript": "^6.0.2"
+  }
+}

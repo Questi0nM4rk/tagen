@@ -1,0 +1,5 @@
+# ai-guardrails:sha256=2915fe9039a8c2e365b3fdf2c4159cccf4957cfe329602df3680c4cfeb84a2d8
+[codespell]
+skip = .git,*.lock,*.baseline,node_modules,.venv,venv,dist,build,*/tests/fixtures/*
+quiet-level = 2
+ignore-words-list = afterall
