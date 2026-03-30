@@ -2,7 +2,7 @@
 
 Skill-graph CLI for qsm-marketplace: resolve tag queries, assemble plugins, validate vocabulary.
 
-[![npm version](https://img.shields.io/npm/v/tagen)](https://www.npmjs.com/package/tagen)
+[![npm version](https://img.shields.io/npm/v/%40questi0nm4rk%2Ftagen)](https://www.npmjs.com/package/@questi0nm4rk/tagen)
 [![CI](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml/badge.svg)](https://github.com/Questi0nM4rk/tagen/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -11,9 +11,9 @@ Skill-graph CLI for qsm-marketplace: resolve tag queries, assemble plugins, vali
 ## Install
 
 ```bash
-bun add -g tagen
+bun add -g @questi0nm4rk/tagen
 # or
-npm install -g tagen
+npm install -g @questi0nm4rk/tagen
 ```
 
 ---
