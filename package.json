@@ -1,6 +1,6 @@
 {
   "name": "@questi0nm4rk/tagen",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Skill-graph CLI — assemble Claude Code plugins from tagged catalog cards",
   "keywords": [
     "claude-code",
@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "build": "bun build src/main.ts --compile --outfile bin/tagen",
-    "build:npm": "bun build src/main.ts --target=bun --outfile bin/tagen.js && chmod +x bin/tagen.js",
+    "build:npm": "bun build src/main.ts --target=bun --outfile bin/tagen.js && printf '#!/usr/bin/env bun\n' | cat - bin/tagen.js > /tmp/tagen-tmp.js && mv /tmp/tagen-tmp.js bin/tagen.js && chmod +x bin/tagen.js",
     "test": "bun test",
     "typecheck": "tsgo --noEmit",
     "lint": "biome check src/ __tests__/",
