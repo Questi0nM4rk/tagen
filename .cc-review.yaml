@@ -1,0 +1,26 @@
+version: 1
+mode: standard
+auto_review: true
+
+languages:
+  - TypeScript
+  - Gherkin
+
+ignore_paths:
+  - "docs/**"
+  - "**/*.md"
+  - "bun.lock"
+  - "bin/**"
+  - "__tests__/**/*.snap"
+
+instructions: |
+  This is a TypeScript CLI (tagen) built with Bun that assembles Claude Code plugins
+  from tagged catalog cards (skill-graph concept). Entry point is src/main.ts.
+  Commands are in src/commands/, library code in src/lib/.
+  Uses biome for linting/formatting, lefthook for git hooks, and Gherkin/BDD tests in features/.
+  Focus on: CLI UX correctness, graph traversal logic, catalog card parsing, error handling at system boundaries.
+
+known_patterns: []
+
+slop_detection: true
+memory: true
