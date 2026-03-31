@@ -182,6 +182,9 @@ export function updateBuildYamlVersion(pluginDir: string, newVersion: string): v
   const configPath = join(pluginDir, "build.yaml");
   const raw = readFileSync(configPath, "utf8");
   const updated = raw.replace(/^version:\s*.+$/m, `version: ${newVersion}`);
+  if (updated === raw) {
+    throw new Error(`updateBuildYamlVersion: no version line found in ${configPath}`);
+  }
   writeFileSync(configPath, updated);
 }
 
