@@ -131,6 +131,7 @@ export function runDiff(
   process.stdout.write("\n");
   if (hasIssues) {
     process.stdout.write("Run 'tagen build --all' to sync.\n");
+    process.exit(1);
   } else {
     process.stdout.write("All plugins in sync.\n");
   }
