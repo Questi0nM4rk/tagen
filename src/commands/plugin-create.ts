@@ -47,7 +47,7 @@ version: 1.0.0
 description: "${description.replace(/"/g, '\\"')}"
 author:
   name: qsm
-keywords: [${keywords.map((k) => k.trim()).join(", ")}]
+keywords: [${keywords.map((k) => `"${k.trim().replace(/"/g, '\\"')}"`).join(", ")}]
 
 queries: []
 

@@ -230,11 +230,11 @@ export function loadMarketplace(root: string): Marketplace | null {
 
 /**
  * Extract plugin directory name from marketplace source path.
- * source is "./plugins/<name>" — returns the directory name.
+ * source is "./plugins/<name>" — returns the directory name, or null if malformed.
  */
-export function pluginNameFromSource(source: string): string {
-  const parts = source.replace(/^\.\//, "").split("/");
-  return parts[1] ?? "";
+export function pluginNameFromSource(source: string): string | null {
+  const match = source.match(/^\.\/plugins\/([^/]+)$/);
+  return match ? match[1] : null;
 }
 
 /**
@@ -251,7 +251,9 @@ export function findOrphansAndPhantoms(root: string): {
   if (!marketplace) return { orphans: [], phantoms: [] };
 
   const inManifest = new Set(
-    marketplace.plugins.map((p) => pluginNameFromSource(p.source))
+    marketplace.plugins
+      .map((p) => pluginNameFromSource(p.source))
+      .filter((name): name is string => name !== null)
   );
 
   const orphans = [...onDisk].filter((name) => !inManifest.has(name));
