@@ -5,7 +5,7 @@ import { sourceExists } from "../lib/catalog";
 import type { CatalogCard } from "../lib/types";
 import { repoRoot } from "../lib/vocabulary";
 
-interface SkillFile {
+export interface SkillFile {
   name: string;
   plugin: string;
   relativePath: string;
@@ -50,7 +50,7 @@ export function runSync(cards: CatalogCard[], vaultDir: string): void {
   }
 }
 
-function discoverSkillFiles(pluginsDir: string): SkillFile[] {
+export function discoverSkillFiles(pluginsDir: string): SkillFile[] {
   const results: SkillFile[] = [];
 
   let plugins: string[];
