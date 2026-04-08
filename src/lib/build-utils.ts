@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { BuildConfig, BuildQuery, CatalogCard } from "./types";
+import type { BuildConfig, BuildQuery, CatalogCard, Marketplace } from "./types";
 
 export function loadBuildConfig(pluginDir: string): BuildConfig {
   const configPath = join(pluginDir, "build.yaml");
@@ -186,6 +186,65 @@ export function updateBuildYamlVersion(pluginDir: string, newVersion: string): v
     throw new Error(`updateBuildYamlVersion: no version line found in ${configPath}`);
   }
   writeFileSync(configPath, updated);
+}
+
+/** Discover ALL plugin directories (not just those with build.yaml) */
+export function discoverAllPlugins(pluginsDir: string): string[] {
+  if (!existsSync(pluginsDir)) return [];
+  return readdirSync(pluginsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+}
+
+/** Load and parse .claude-plugin/marketplace.json, or null if missing */
+export function loadMarketplace(root: string): Marketplace | null {
+  const manifestPath = join(root, ".claude-plugin", "marketplace.json");
+  if (!existsSync(manifestPath)) return null;
+  const raw = readFileSync(manifestPath, "utf8");
+  return JSON.parse(raw) as Marketplace;
+}
+
+/**
+ * Extract plugin directory name from marketplace source path.
+ * source is "./plugins/<name>" — returns the directory name.
+ */
+export function pluginNameFromSource(source: string): string {
+  const parts = source.replace(/^\.\//, "").split("/");
+  return parts[1] ?? "";
+}
+
+/**
+ * Compare plugin directories on disk against marketplace.json entries.
+ * Returns orphans (on disk, not in manifest) and phantoms (in manifest, not on disk).
+ */
+export function findOrphansAndPhantoms(root: string): {
+  orphans: string[];
+  phantoms: string[];
+} {
+  const pluginsDir = join(root, "plugins");
+  const onDisk = new Set(discoverAllPlugins(pluginsDir));
+  const marketplace = loadMarketplace(root);
+  if (!marketplace) return { orphans: [], phantoms: [] };
+
+  const inManifest = new Set(
+    marketplace.plugins.map((p) => pluginNameFromSource(p.source))
+  );
+
+  const orphans = [...onDisk].filter((name) => !inManifest.has(name));
+  const phantoms = [...inManifest].filter((name) => !onDisk.has(name));
+  return { orphans, phantoms };
+}
+
+/** Generate plugin.json manifest content from a BuildConfig */
+export function generatePluginJson(config: BuildConfig): string {
+  const manifest: Record<string, unknown> = {
+    name: config.name,
+    version: config.version,
+    description: config.description,
+    author: config.author,
+    keywords: config.keywords,
+  };
+  return `${JSON.stringify(manifest, null, 2)}\n`;
 }
 
 /** Generate marketplace.json from all build.yaml files */

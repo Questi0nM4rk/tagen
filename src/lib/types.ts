@@ -46,6 +46,22 @@ export interface Vocabulary {
   relationships: Record<string, string>;
 }
 
+export interface MarketplacePlugin {
+  name: string;
+  source: string;
+  description: string;
+  version: string;
+  author: { name: string };
+  keywords: string[];
+}
+
+export interface Marketplace {
+  name: string;
+  description: string;
+  owner: { name: string };
+  plugins: MarketplacePlugin[];
+}
+
 export interface ResolvedPath {
   filters: Record<string, string[]>;
   path: Array<{

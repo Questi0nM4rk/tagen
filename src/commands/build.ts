@@ -5,6 +5,7 @@ import {
   computeContentHash,
   discoverBuildPlugins,
   generateMarketplaceJson,
+  generatePluginJson,
   loadBuildConfig,
   promptBumpType,
   readBuildHash,
@@ -78,18 +79,6 @@ function generateSkillMd(card: CatalogCard): string {
   lines.push("");
 
   return lines.join("\n");
-}
-
-function generatePluginJson(config: BuildConfig): string {
-  // hooks are auto-discovered by CC from hooks/hooks.json — never emit in manifest
-  const manifest: Record<string, unknown> = {
-    name: config.name,
-    version: config.version,
-    description: config.description,
-    author: config.author,
-    keywords: config.keywords,
-  };
-  return `${JSON.stringify(manifest, null, 2)}\n`;
 }
 
 function ensureDir(dir: string): void {
