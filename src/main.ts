@@ -125,8 +125,7 @@ async function main(): Promise<void> {
       const subCommand = args[1];
       switch (subCommand) {
         case "create": {
-          const vocab = loadVocabulary(vaultDir);
-          await runPluginCreate(vocab, vaultDir, args.slice(2));
+          await runPluginCreate(vaultDir, args.slice(2));
           break;
         }
         case "check": {

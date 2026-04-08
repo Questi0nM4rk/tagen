@@ -13,6 +13,8 @@ export function runPluginCheck(root: string): void {
     process.exit(1);
   }
 
+  const pluginsDir = join(root, "plugins");
+  const pluginCount = discoverAllPlugins(pluginsDir).length;
   const { orphans, phantoms } = findOrphansAndPhantoms(root);
   let issues = 0;
 
@@ -32,12 +34,9 @@ export function runPluginCheck(root: string): void {
     issues += phantoms.length;
   }
 
-  const pluginsDir = join(root, "plugins");
-  const onDisk = discoverAllPlugins(pluginsDir);
-
   if (issues === 0) {
     process.stdout.write(
-      `All ${onDisk.length} plugin(s) registered. No orphans or phantoms.\n`
+      `All ${pluginCount} plugin(s) registered. No orphans or phantoms.\n`
     );
   } else {
     process.stdout.write(`\n${issues} issue(s) found.\n`);

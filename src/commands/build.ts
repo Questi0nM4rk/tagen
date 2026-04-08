@@ -166,8 +166,9 @@ export async function runBuild(
     }
   }
 
-  const manifestPath = join(root, ".claude-plugin", "marketplace.json");
-  writeFileSync(manifestPath, generateMarketplaceJson(root));
+  const manifestDir = join(root, ".claude-plugin");
+  ensureDir(manifestDir);
+  writeFileSync(join(manifestDir, "marketplace.json"), generateMarketplaceJson(root));
 
   process.stdout.write(
     `\nBuilt ${names.length} plugin(s), ${totalSkills} skill(s) total.`

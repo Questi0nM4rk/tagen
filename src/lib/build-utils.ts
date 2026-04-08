@@ -12,13 +12,25 @@ export function loadBuildConfig(pluginDir: string): BuildConfig {
   const raw = readFileSync(configPath, "utf8");
   const parsed = parseYaml(raw) as Record<string, unknown>;
 
+  const author =
+    parsed.author && typeof parsed.author === "object" && "name" in parsed.author
+      ? { name: String((parsed.author as Record<string, unknown>).name) }
+      : { name: "qsm" };
+
+  const queries: BuildQuery[] = Array.isArray(parsed.queries)
+    ? parsed.queries.filter(
+        (q): q is BuildQuery =>
+          q !== null && typeof q === "object" && "tags" in (q as Record<string, unknown>)
+      )
+    : [];
+
   return {
     name: String(parsed.name ?? ""),
     version: String(parsed.version ?? "0.0.0"),
     description: String(parsed.description ?? ""),
-    author: (parsed.author as { name: string }) ?? { name: "qsm" },
+    author,
     keywords: Array.isArray(parsed.keywords) ? parsed.keywords.map(String) : [],
-    queries: Array.isArray(parsed.queries) ? (parsed.queries as BuildQuery[]) : [],
+    queries,
     include: Array.isArray(parsed.include) ? parsed.include.map(String) : [],
     exclude: Array.isArray(parsed.exclude) ? parsed.exclude.map(String) : [],
     hooks: typeof parsed.hooks === "string" ? parsed.hooks : undefined,
@@ -196,12 +208,22 @@ export function discoverAllPlugins(pluginsDir: string): string[] {
     .map((d) => d.name);
 }
 
-/** Load and parse .claude-plugin/marketplace.json, or null if missing */
+/** Load and parse .claude-plugin/marketplace.json, or null if missing/invalid */
 export function loadMarketplace(root: string): Marketplace | null {
   const manifestPath = join(root, ".claude-plugin", "marketplace.json");
   if (!existsSync(manifestPath)) return null;
   const raw = readFileSync(manifestPath, "utf8");
-  return JSON.parse(raw) as Marketplace;
+  try {
+    const parsed = JSON.parse(raw) as Marketplace;
+    if (!Array.isArray(parsed.plugins)) {
+      process.stderr.write(`Warning: marketplace.json missing "plugins" array\n`);
+      return null;
+    }
+    return parsed;
+  } catch {
+    process.stderr.write(`Warning: marketplace.json is not valid JSON\n`);
+    return null;
+  }
 }
 
 /**

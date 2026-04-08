@@ -12,7 +12,6 @@ import {
   compareContent,
   findBuiltSkills,
 } from "../src/commands/diff.ts";
-import { loadAllCards } from "../src/lib/catalog.ts";
 import {
   createTempProject,
   makeCard,

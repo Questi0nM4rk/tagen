@@ -4,11 +4,13 @@ import {
   generateMarketplaceJson,
   generatePluginJson,
 } from "../lib/build-utils";
-import type { BuildConfig, Vocabulary } from "../lib/types";
+import type { BuildConfig } from "../lib/types";
 import { repoRoot } from "../lib/vocabulary";
 
+/** Only allow safe characters in plugin/skill names to prevent path traversal and YAML injection */
+const SAFE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
 export async function runPluginCreate(
-  vocab: Vocabulary,
   vaultDir: string,
   args: string[]
 ): Promise<void> {
@@ -23,13 +25,23 @@ export async function runPluginCreate(
     process.exit(1);
   }
 
+  if (!SAFE_NAME.test(opts.name)) {
+    process.stderr.write(`Invalid plugin name: "${opts.name}". Use only letters, digits, dashes, dots, and underscores.\n`);
+    process.exit(1);
+  }
+
+  const skillName = opts.skill || opts.name;
+  if (!SAFE_NAME.test(skillName)) {
+    process.stderr.write(`Invalid skill name: "${skillName}". Use only letters, digits, dashes, dots, and underscores.\n`);
+    process.exit(1);
+  }
+
   const pluginDir = join(root, "plugins", opts.name);
   if (existsSync(pluginDir)) {
     process.stderr.write(`Plugin directory already exists: plugins/${opts.name}/\n`);
     process.exit(1);
   }
 
-  const skillName = opts.skill || opts.name;
   const description = opts.description || `${opts.name} plugin`;
   const keywords = opts.keywords;
 
