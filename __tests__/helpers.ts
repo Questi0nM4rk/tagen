@@ -3,7 +3,7 @@
  * Lightweight subprocess runner + temp project factory.
  */
 
-import { cpSync, mkdtempSync, mkdirSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CatalogCard } from "../src/lib/types";
@@ -29,10 +29,7 @@ export interface SpawnResult {
  * Run tagen via bun with the given args in the specified directory.
  * Spawns a real subprocess — safe against process.exit() in commands.
  */
-export async function spawnTagen(
-  args: string[],
-  cwd: string
-): Promise<SpawnResult> {
+export async function spawnTagen(args: string[], cwd: string): Promise<SpawnResult> {
   const proc = Bun.spawn(["bun", "run", TAGEN_ENTRY, ...args], {
     cwd,
     stdout: "pipe",
@@ -55,9 +52,7 @@ export async function spawnTagen(
  * Create a temporary project directory pre-populated with skill-graph fixtures.
  * Returns the temp dir path — caller must clean up.
  */
-export function createTempProject(opts?: {
-  plugins?: string[];
-}): string {
+export function createTempProject(opts?: { plugins?: string[] }): string {
   const dir = mkdtempSync(join(tmpdir(), "tagen-test-"));
 
   // Copy skill-graph (vocabulary + skills)

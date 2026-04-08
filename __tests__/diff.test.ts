@@ -1,22 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  compareContent,
-  findBuiltSkills,
-} from "../src/commands/diff.ts";
-import {
-  createTempProject,
-  makeCard,
-  spawnTagen,
-} from "./helpers";
+import { compareContent, findBuiltSkills } from "../src/commands/diff.ts";
+import { createTempProject, makeCard, spawnTagen } from "./helpers";
 
 let tmpDir: string;
 
@@ -172,9 +159,15 @@ describe("tagen diff (integration)", () => {
     const projectDir = createTempProject({ plugins: ["qsm-methodology"] });
     try {
       // Build first to create the plugin output
-      await spawnTagen(["build", "--plugin", "qsm-methodology", "--no-bump"], projectDir);
+      await spawnTagen(
+        ["build", "--plugin", "qsm-methodology", "--no-bump"],
+        projectDir
+      );
       // Diff should show in sync
-      const { exitCode, stdout } = await spawnTagen(["diff", "--plugin", "qsm-methodology"], projectDir);
+      const { exitCode, stdout } = await spawnTagen(
+        ["diff", "--plugin", "qsm-methodology"],
+        projectDir
+      );
       expect(exitCode).toBe(0);
       expect(stdout).toContain("All plugins in sync");
     } finally {
@@ -186,14 +179,20 @@ describe("tagen diff (integration)", () => {
     const projectDir = createTempProject({ plugins: ["qsm-methodology"] });
     try {
       // Build first
-      await spawnTagen(["build", "--plugin", "qsm-methodology", "--no-bump"], projectDir);
+      await spawnTagen(
+        ["build", "--plugin", "qsm-methodology", "--no-bump"],
+        projectDir
+      );
 
       // Modify the catalog card body to make content stale
       const cardPath = join(projectDir, "skill-graph", "skills", "tdd-workflow.md");
       const original = readFileSync(cardPath, "utf8");
       writeFileSync(cardPath, `${original}\n\nExtra content that makes it stale.`);
 
-      const { exitCode, stdout } = await spawnTagen(["diff", "--plugin", "qsm-methodology"], projectDir);
+      const { exitCode, stdout } = await spawnTagen(
+        ["diff", "--plugin", "qsm-methodology"],
+        projectDir
+      );
       expect(exitCode).toBe(1);
       expect(stdout).toContain("STALE");
     } finally {
@@ -205,14 +204,26 @@ describe("tagen diff (integration)", () => {
     const projectDir = createTempProject({ plugins: ["qsm-methodology"] });
     try {
       // Build first
-      await spawnTagen(["build", "--plugin", "qsm-methodology", "--no-bump"], projectDir);
+      await spawnTagen(
+        ["build", "--plugin", "qsm-methodology", "--no-bump"],
+        projectDir
+      );
 
       // Manually create an orphan skill directory
-      const orphanDir = join(projectDir, "plugins", "qsm-methodology", "skills", "orphan-skill");
+      const orphanDir = join(
+        projectDir,
+        "plugins",
+        "qsm-methodology",
+        "skills",
+        "orphan-skill"
+      );
       mkdirSync(orphanDir, { recursive: true });
       writeFileSync(join(orphanDir, "SKILL.md"), "---\nname: orphan\n---\n# Orphan");
 
-      const { exitCode, stdout } = await spawnTagen(["diff", "--plugin", "qsm-methodology"], projectDir);
+      const { exitCode, stdout } = await spawnTagen(
+        ["diff", "--plugin", "qsm-methodology"],
+        projectDir
+      );
       expect(exitCode).toBe(1);
       expect(stdout).toContain("ORPHAN");
     } finally {

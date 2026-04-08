@@ -88,10 +88,7 @@ describe("tagen plugin create", () => {
 
   test("updates marketplace.json", () => {
     const marketplace = JSON.parse(
-      readFileSync(
-        join(projectDir, ".claude-plugin", "marketplace.json"),
-        "utf8"
-      )
+      readFileSync(join(projectDir, ".claude-plugin", "marketplace.json"), "utf8")
     );
     const entry = marketplace.plugins.find(
       (p: { name: string }) => p.name === "test-plugin"
@@ -138,8 +135,8 @@ describe("tagen plugin create (defaults)", () => {
     ).toBe(true);
 
     // Catalog card named after the plugin
-    expect(
-      existsSync(join(projectDir, "skill-graph", "skills", "auto-skill.md"))
-    ).toBe(true);
+    expect(existsSync(join(projectDir, "skill-graph", "skills", "auto-skill.md"))).toBe(
+      true
+    );
   });
 });

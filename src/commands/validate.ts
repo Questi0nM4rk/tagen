@@ -34,10 +34,14 @@ export function runValidate(
   // Marketplace cross-check (additive — skip if no marketplace.json)
   const { orphans, phantoms } = findOrphansAndPhantoms(root);
   for (const name of orphans) {
-    errors.push(`[marketplace] orphan plugin: plugins/${name}/ not in marketplace.json`);
+    errors.push(
+      `[marketplace] orphan plugin: plugins/${name}/ not in marketplace.json`
+    );
   }
   for (const name of phantoms) {
-    errors.push(`[marketplace] phantom entry: ${name} in marketplace.json but directory missing`);
+    errors.push(
+      `[marketplace] phantom entry: ${name} in marketplace.json but directory missing`
+    );
   }
 
   if (errors.length === 0) {

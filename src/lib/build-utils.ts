@@ -20,7 +20,9 @@ export function loadBuildConfig(pluginDir: string): BuildConfig {
   const queries: BuildQuery[] = Array.isArray(parsed.queries)
     ? parsed.queries.filter(
         (q): q is BuildQuery =>
-          q !== null && typeof q === "object" && "tags" in (q as Record<string, unknown>)
+          q !== null &&
+          typeof q === "object" &&
+          "tags" in (q as Record<string, unknown>)
       )
     : [];
 

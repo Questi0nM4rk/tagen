@@ -1,24 +1,17 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  generateMarketplaceJson,
-  generatePluginJson,
-} from "../lib/build-utils";
+import { generateMarketplaceJson, generatePluginJson } from "../lib/build-utils";
 import type { BuildConfig } from "../lib/types";
 import { repoRoot } from "../lib/vocabulary";
 
 /** Only allow safe characters in plugin/skill names to prevent path traversal and YAML injection */
 const SAFE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
-export async function runPluginCreate(
-  vaultDir: string,
-  args: string[]
-): Promise<void> {
+export async function runPluginCreate(vaultDir: string, args: string[]): Promise<void> {
   const root = repoRoot(vaultDir);
 
-  const opts = args[0] && !args[0].startsWith("--")
-    ? parseFlags(args)
-    : await promptInteractive();
+  const opts =
+    args[0] && !args[0].startsWith("--") ? parseFlags(args) : await promptInteractive();
 
   if (!opts.name) {
     process.stderr.write("No plugin name provided.\n");
@@ -26,13 +19,17 @@ export async function runPluginCreate(
   }
 
   if (!SAFE_NAME.test(opts.name)) {
-    process.stderr.write(`Invalid plugin name: "${opts.name}". Use only letters, digits, dashes, dots, and underscores.\n`);
+    process.stderr.write(
+      `Invalid plugin name: "${opts.name}". Use only letters, digits, dashes, dots, and underscores.\n`
+    );
     process.exit(1);
   }
 
   const skillName = opts.skill || opts.name;
   if (!SAFE_NAME.test(skillName)) {
-    process.stderr.write(`Invalid skill name: "${skillName}". Use only letters, digits, dashes, dots, and underscores.\n`);
+    process.stderr.write(
+      `Invalid skill name: "${skillName}". Use only letters, digits, dashes, dots, and underscores.\n`
+    );
     process.exit(1);
   }
 
@@ -118,7 +115,9 @@ ${description}
     );
     process.stdout.write(`Created catalog card: skill-graph/skills/${skillName}.md\n`);
   } else {
-    process.stdout.write(`Catalog card already exists: skill-graph/skills/${skillName}.md\n`);
+    process.stdout.write(
+      `Catalog card already exists: skill-graph/skills/${skillName}.md\n`
+    );
   }
 
   const marketplacePath = join(root, ".claude-plugin", "marketplace.json");
@@ -126,7 +125,9 @@ ${description}
   writeFileSync(marketplacePath, generateMarketplaceJson(root));
 
   process.stdout.write(`Created plugin: plugins/${opts.name}/\n`);
-  process.stdout.write(`  build.yaml, plugin.json, SKILL.md stub, marketplace.json updated.\n`);
+  process.stdout.write(
+    `  build.yaml, plugin.json, SKILL.md stub, marketplace.json updated.\n`
+  );
 }
 
 // ─── Flag parsing ───────────────────────────────────────────────────────────
@@ -153,7 +154,10 @@ function parseFlags(args: string[]): PluginOpts {
         skill = args[++i] ?? "";
         break;
       case "--keywords":
-        keywords = (args[++i] ?? "").split(",").map((k) => k.trim()).filter(Boolean);
+        keywords = (args[++i] ?? "")
+          .split(",")
+          .map((k) => k.trim())
+          .filter(Boolean);
         break;
     }
   }

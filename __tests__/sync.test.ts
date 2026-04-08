@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { discoverSkillFiles } from "../src/commands/sync.ts";
-import { SKILL_GRAPH_FIXTURES, createTempProject, spawnTagen } from "./helpers";
+import { createTempProject, SKILL_GRAPH_FIXTURES, spawnTagen } from "./helpers";
 
 let tmpDir: string;
 
@@ -101,10 +101,7 @@ describe("tagen sync (integration)", () => {
       const sgDir = join(projectDir, "skill-graph");
       mkdirSync(join(sgDir, "skills"), { recursive: true });
       const vocabSrc = join(SKILL_GRAPH_FIXTURES, "vocabulary.yaml");
-      writeFileSync(
-        join(sgDir, "vocabulary.yaml"),
-        readFileSync(vocabSrc, "utf8")
-      );
+      writeFileSync(join(sgDir, "vocabulary.yaml"), readFileSync(vocabSrc, "utf8"));
 
       // Single catalog card pointing to a source that will exist
       writeFileSync(
@@ -131,10 +128,7 @@ enhances: []
       // Create the source SKILL.md so it's not orphaned
       const skillDir = join(projectDir, "plugins", "my-plugin", "skills", "my-skill");
       mkdirSync(skillDir, { recursive: true });
-      writeFileSync(
-        join(skillDir, "SKILL.md"),
-        "---\nname: my-skill\n---\n# My Skill"
-      );
+      writeFileSync(join(skillDir, "SKILL.md"), "---\nname: my-skill\n---\n# My Skill");
 
       mkdirSync(join(projectDir, ".claude-plugin"), { recursive: true });
 
