@@ -1,4 +1,6 @@
-import { findOrphansAndPhantoms } from "../lib/build-utils";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { findOrphansAndPhantoms, loadMarketplace } from "../lib/build-utils";
 import { sourceExists } from "../lib/catalog";
 import type { CatalogCard, Vocabulary } from "../lib/types";
 import { validateCard } from "../lib/vocabulary";
@@ -31,7 +33,11 @@ export function runValidate(
     }
   }
 
-  // Marketplace cross-check (additive — skip if no marketplace.json)
+  // Marketplace cross-check — skip only if file doesn't exist, fail if unreadable
+  const mpPath = join(root, ".claude-plugin", "marketplace.json");
+  if (existsSync(mpPath) && loadMarketplace(root) === null) {
+    errors.push("[marketplace] marketplace.json exists but is invalid or unreadable");
+  }
   const { orphans, phantoms } = findOrphansAndPhantoms(root);
   for (const name of orphans) {
     errors.push(
