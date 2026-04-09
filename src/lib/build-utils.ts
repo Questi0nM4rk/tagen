@@ -17,14 +17,22 @@ export function loadBuildConfig(pluginDir: string): BuildConfig {
       ? { name: String((parsed.author as Record<string, unknown>).name) }
       : { name: "qsm" };
 
-  const queries: BuildQuery[] = Array.isArray(parsed.queries)
-    ? parsed.queries.filter(
-        (q): q is BuildQuery =>
-          q !== null &&
-          typeof q === "object" &&
-          "tags" in (q as Record<string, unknown>)
-      )
-    : [];
+  const queries: BuildQuery[] = [];
+  if (Array.isArray(parsed.queries)) {
+    for (const [i, q] of parsed.queries.entries()) {
+      if (
+        q !== null &&
+        typeof q === "object" &&
+        "tags" in (q as Record<string, unknown>)
+      ) {
+        queries.push(q as BuildQuery);
+      } else {
+        process.stderr.write(
+          `Warning: ${pluginDir}/build.yaml query[${i}] missing "tags" field — skipped\n`
+        );
+      }
+    }
+  }
 
   return {
     name: String(parsed.name ?? ""),
@@ -241,13 +249,16 @@ export function pluginNameFromSource(source: string): string | null {
  * Compare plugin directories on disk against marketplace.json entries.
  * Returns orphans (on disk, not in manifest) and phantoms (in manifest, not on disk).
  */
-export function findOrphansAndPhantoms(root: string): {
+export function findOrphansAndPhantoms(
+  root: string,
+  preloaded?: Marketplace | null
+): {
   orphans: string[];
   phantoms: string[];
 } {
   const pluginsDir = join(root, "plugins");
   const onDisk = new Set(discoverAllPlugins(pluginsDir));
-  const marketplace = loadMarketplace(root);
+  const marketplace = preloaded !== undefined ? preloaded : loadMarketplace(root);
   if (!marketplace) return { orphans: [], phantoms: [] };
 
   const inManifest = new Set(

@@ -33,12 +33,13 @@ export function runValidate(
     }
   }
 
-  // Marketplace cross-check — skip only if file doesn't exist, fail if unreadable
+  // Marketplace cross-check — load once, reuse for both null check and orphan detection
   const mpPath = join(root, ".claude-plugin", "marketplace.json");
-  if (existsSync(mpPath) && loadMarketplace(root) === null) {
+  const marketplace = existsSync(mpPath) ? loadMarketplace(root) : undefined;
+  if (existsSync(mpPath) && marketplace === null) {
     errors.push("[marketplace] marketplace.json exists but is invalid or unreadable");
   }
-  const { orphans, phantoms } = findOrphansAndPhantoms(root);
+  const { orphans, phantoms } = findOrphansAndPhantoms(root, marketplace);
   for (const name of orphans) {
     errors.push(
       `[marketplace] orphan plugin: plugins/${name}/ not in marketplace.json`
