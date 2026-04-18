@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { BuildConfig, BuildQuery, CatalogCard } from "./types";
+import type { BuildConfig, BuildQuery, CatalogCard, Marketplace } from "./types";
 
 export function loadBuildConfig(pluginDir: string): BuildConfig {
   const configPath = join(pluginDir, "build.yaml");
@@ -12,13 +12,35 @@ export function loadBuildConfig(pluginDir: string): BuildConfig {
   const raw = readFileSync(configPath, "utf8");
   const parsed = parseYaml(raw) as Record<string, unknown>;
 
+  const author =
+    parsed.author && typeof parsed.author === "object" && "name" in parsed.author
+      ? { name: String((parsed.author as Record<string, unknown>).name) }
+      : { name: "qsm" };
+
+  const queries: BuildQuery[] = [];
+  if (Array.isArray(parsed.queries)) {
+    for (const [i, q] of parsed.queries.entries()) {
+      if (
+        q !== null &&
+        typeof q === "object" &&
+        "tags" in (q as Record<string, unknown>)
+      ) {
+        queries.push(q as BuildQuery);
+      } else {
+        process.stderr.write(
+          `Warning: ${pluginDir}/build.yaml query[${i}] missing "tags" field — skipped\n`
+        );
+      }
+    }
+  }
+
   return {
     name: String(parsed.name ?? ""),
     version: String(parsed.version ?? "0.0.0"),
     description: String(parsed.description ?? ""),
-    author: (parsed.author as { name: string }) ?? { name: "qsm" },
+    author,
     keywords: Array.isArray(parsed.keywords) ? parsed.keywords.map(String) : [],
-    queries: Array.isArray(parsed.queries) ? (parsed.queries as BuildQuery[]) : [],
+    queries,
     include: Array.isArray(parsed.include) ? parsed.include.map(String) : [],
     exclude: Array.isArray(parsed.exclude) ? parsed.exclude.map(String) : [],
     hooks: typeof parsed.hooks === "string" ? parsed.hooks : undefined,
@@ -186,6 +208,80 @@ export function updateBuildYamlVersion(pluginDir: string, newVersion: string): v
     throw new Error(`updateBuildYamlVersion: no version line found in ${configPath}`);
   }
   writeFileSync(configPath, updated);
+}
+
+/** Discover ALL plugin directories (not just those with build.yaml) */
+export function discoverAllPlugins(pluginsDir: string): string[] {
+  if (!existsSync(pluginsDir)) return [];
+  return readdirSync(pluginsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+}
+
+/** Load and parse .claude-plugin/marketplace.json, or null if missing/invalid */
+export function loadMarketplace(root: string): Marketplace | null {
+  const manifestPath = join(root, ".claude-plugin", "marketplace.json");
+  if (!existsSync(manifestPath)) return null;
+  const raw = readFileSync(manifestPath, "utf8");
+  try {
+    const parsed = JSON.parse(raw) as Marketplace;
+    if (!Array.isArray(parsed.plugins)) {
+      process.stderr.write(`Warning: marketplace.json missing "plugins" array\n`);
+      return null;
+    }
+    return parsed;
+  } catch {
+    process.stderr.write(`Warning: marketplace.json is not valid JSON\n`);
+    return null;
+  }
+}
+
+/**
+ * Extract plugin directory name from marketplace source path.
+ * source is "./plugins/<name>" — returns the directory name, or null if malformed.
+ */
+export function pluginNameFromSource(source: string): string | null {
+  const match = source.match(/^\.\/plugins\/([^/]+)$/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Compare plugin directories on disk against marketplace.json entries.
+ * Returns orphans (on disk, not in manifest) and phantoms (in manifest, not on disk).
+ */
+export function findOrphansAndPhantoms(
+  root: string,
+  preloaded?: Marketplace | null
+): {
+  orphans: string[];
+  phantoms: string[];
+} {
+  const pluginsDir = join(root, "plugins");
+  const onDisk = new Set(discoverAllPlugins(pluginsDir));
+  const marketplace = preloaded !== undefined ? preloaded : loadMarketplace(root);
+  if (!marketplace) return { orphans: [], phantoms: [] };
+
+  const inManifest = new Set(
+    marketplace.plugins
+      .map((p) => pluginNameFromSource(p.source))
+      .filter((name): name is string => name !== null)
+  );
+
+  const orphans = [...onDisk].filter((name) => !inManifest.has(name));
+  const phantoms = [...inManifest].filter((name) => !onDisk.has(name));
+  return { orphans, phantoms };
+}
+
+/** Generate plugin.json manifest content from a BuildConfig */
+export function generatePluginJson(config: BuildConfig): string {
+  const manifest: Record<string, unknown> = {
+    name: config.name,
+    version: config.version,
+    description: config.description,
+    author: config.author,
+    keywords: config.keywords,
+  };
+  return `${JSON.stringify(manifest, null, 2)}\n`;
 }
 
 /** Generate marketplace.json from all build.yaml files */

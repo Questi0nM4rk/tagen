@@ -7,15 +7,15 @@ import {
 } from "../lib/build-utils";
 import type { CatalogCard } from "../lib/types";
 
-type DiffStatus = "IN_SYNC" | "STALE" | "MISSING" | "ORPHAN";
+export type DiffStatus = "IN_SYNC" | "STALE" | "MISSING" | "ORPHAN";
 
-interface DiffEntry {
+export interface DiffEntry {
   skill: string;
   status: DiffStatus;
   detail?: string;
 }
 
-function findBuiltSkills(pluginDir: string): Set<string> {
+export function findBuiltSkills(pluginDir: string): Set<string> {
   const skillsDir = join(pluginDir, "skills");
   if (!existsSync(skillsDir)) return new Set();
   return new Set(
@@ -25,7 +25,7 @@ function findBuiltSkills(pluginDir: string): Set<string> {
   );
 }
 
-function compareContent(card: CatalogCard, pluginDir: string): DiffEntry {
+export function compareContent(card: CatalogCard, pluginDir: string): DiffEntry {
   const refPath = join(
     pluginDir,
     "skills",
