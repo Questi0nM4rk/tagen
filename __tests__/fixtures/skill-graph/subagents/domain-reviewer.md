@@ -1,8 +1,8 @@
 ---
-name: v2-domain-reviewer
+name: domain-reviewer
 model: sonnet
 description: "Performs domain-scoped review of a diff partition and emits structured findings."
-consumes: [recon-summary]
+consumes: []
 emits: [finding]
 references: [language-patterns]
 ---

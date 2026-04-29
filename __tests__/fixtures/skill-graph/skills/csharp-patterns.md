@@ -1,6 +1,5 @@
 ---
-skill: v2-csharp-patterns
-plugin: qsm-dotnet-review
+skill: csharp-patterns
 description: "C# / .NET language-specific review patterns for strict-review slot filling."
 tags:
   phase: [review]

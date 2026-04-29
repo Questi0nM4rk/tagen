@@ -115,8 +115,8 @@ describe("getOrder", () => {
 function makeCard(overrides: Partial<CatalogCard> = {}): CatalogCard {
   return {
     skill: "test-skill",
-    plugin: "test-plugin",
-    source: "plugins/test/skills/test-skill/SKILL.md",
+    description: "A test skill.",
+    summary: [],
     tags: {
       phase: ["implementation"],
       domain: ["testing"],
@@ -124,11 +124,6 @@ function makeCard(overrides: Partial<CatalogCard> = {}): CatalogCard {
       layer: "standards",
       concerns: ["testing"],
     },
-    composes: [],
-    enhances: [],
-    description: "A test skill.",
-    ironLaws: [],
-    summary: [],
     provides: [],
     requires: [],
     emits: [],
@@ -138,6 +133,7 @@ function makeCard(overrides: Partial<CatalogCard> = {}): CatalogCard {
     deep: { subagents: [], refs: [], slots: {}, validators: [] },
     body: "# Test",
     filePath: "/tmp/test-skill.md",
+    legacyFields: [],
     ...overrides,
   };
 }

@@ -28,7 +28,7 @@ Feature: tagen get — resolve composition into a JSON manifest
 
   Scenario: --card override restricts matched set to named cards and resolves slots
     Given a skill-graph with v2 cards that satisfy all requires
-    When I run "tagen get --card v2-strict-review --card v2-csharp-patterns --json"
+    When I run "tagen get --card strict-review --card csharp-patterns --json"
     Then it exits 0
     And stdout is valid JSON
     And manifest.modules contains only the named cards

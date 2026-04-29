@@ -21,13 +21,14 @@ export function runList(cards: CatalogCard[], json: boolean, filter?: string): v
     return;
   }
 
-  const header = `${"SKILL".padEnd(26)} ${"PLUGIN".padEnd(24)} ${"LAYER".padEnd(16)} ${"PHASE".padEnd(30)} LANGUAGE`;
+  const header = `${"SKILL".padEnd(28)} ${"LANGUAGE".padEnd(12)} ${"LAYER".padEnd(14)} ${"PHASE".padEnd(28)} DOMAIN`;
   process.stdout.write(`${header}\n${"─".repeat(header.length)}\n`);
 
   for (const c of filtered) {
     const phases = c.tags.phase.join(", ");
+    const domains = c.tags.domain.join(", ");
     process.stdout.write(
-      `${c.skill.padEnd(26)} ${c.plugin.padEnd(24)} ${c.tags.layer.padEnd(16)} ${phases.padEnd(30)} ${c.tags.language}\n`
+      `${c.skill.padEnd(28)} ${c.tags.language.padEnd(12)} ${c.tags.layer.padEnd(14)} ${phases.padEnd(28)} ${domains}\n`
     );
   }
 
@@ -37,10 +38,9 @@ export function runList(cards: CatalogCard[], json: boolean, filter?: string): v
 function cardSummary(c: CatalogCard) {
   return {
     skill: c.skill,
-    plugin: c.plugin,
-    layer: c.tags.layer,
-    phase: c.tags.phase,
-    language: c.tags.language,
-    source: c.source,
+    description: c.description,
+    tags: c.tags,
+    provides: c.provides,
+    requires: c.requires,
   };
 }
