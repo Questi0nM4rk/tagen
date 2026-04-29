@@ -6,7 +6,7 @@ import {
   loadCapabilities,
 } from "../src/lib/capabilities.ts";
 
-const FIXTURES = join(import.meta.dir, "fixtures/skill-graph-v2");
+const FIXTURES = join(import.meta.dir, "fixtures/skill-graph");
 
 // ─── loadCapabilities ─────────────────────────────────────────────────────────
 
