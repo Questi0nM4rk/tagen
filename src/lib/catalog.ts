@@ -10,7 +10,9 @@ function parseCard(filePath: string): CatalogCard | null {
   if (parts.length < 3) return null;
 
   const yaml = parseYaml(parts[1]) as Record<string, unknown>;
-  if (!yaml.skill || !yaml.plugin || !yaml.source) return null;
+  // v2 cards only require `skill`. `plugin` and `source` are v1 fields kept
+  // for backward compat — v2 modules resolve by convention to brain/<skill>/.
+  if (!yaml.skill) return null;
 
   const tags = (yaml.tags ?? {}) as Record<string, unknown>;
 
@@ -25,10 +27,17 @@ function parseCard(filePath: string): CatalogCard | null {
     description = lines[0]?.trim() ?? "";
   }
 
+  const surfaceRaw = (yaml.surface ?? {}) as Record<string, unknown>;
+  const coreRaw = (yaml.core ?? {}) as Record<string, unknown>;
+  const deepRaw = (yaml.deep ?? {}) as Record<string, unknown>;
+  const slotsRaw = (deepRaw.slots ?? {}) as Record<string, unknown>;
+  const slots: Record<string, true> = {};
+  for (const k of Object.keys(slotsRaw)) slots[k] = true;
+
   return {
     skill: String(yaml.skill),
-    plugin: String(yaml.plugin),
-    source: String(yaml.source),
+    plugin: String(yaml.plugin ?? ""),
+    source: String(yaml.source ?? ""),
     tags: {
       phase: toStringArray(tags.phase),
       domain: toStringArray(tags.domain),
@@ -40,6 +49,23 @@ function parseCard(filePath: string): CatalogCard | null {
     enhances: toStringArray(yaml.enhances),
     description,
     ironLaws: toStringArray(yaml.iron_laws),
+    summary: toStringArray(yaml.summary),
+    provides: toStringArray(yaml.provides),
+    requires: toStringArray(yaml.requires),
+    emits: toStringArray(yaml.emits),
+    consumes: toStringArray(yaml.consumes),
+    surface: {
+      triggers: toStringArray(surfaceRaw.triggers),
+    },
+    core: {
+      files: toStringArray(coreRaw.files),
+    },
+    deep: {
+      subagents: toStringArray(deepRaw.subagents),
+      refs: toStringArray(deepRaw.refs),
+      slots,
+      validators: toStringArray(deepRaw.validators),
+    },
     body,
     filePath,
   };
@@ -121,22 +147,29 @@ export function sortCards(cards: CatalogCard[], vocab: Vocabulary): CatalogCard[
   const phaseOrder = getOrder(vocab, "phase");
   const layerOrder = getOrder(vocab, "layer");
 
+  // Pre-compute index maps so the comparator is O(1) per lookup instead of
+  // O(P) via indexOf. With N log N comparisons this matters at 100+ cards.
+  const phaseIndex = new Map(phaseOrder.map((p, i) => [p, i]));
+  const layerIndex = new Map(layerOrder.map((l, i) => [l, i]));
   const END = phaseOrder.length;
+
   return [...cards].sort((a, b) => {
     // Sort by earliest phase (unknown phases sort to end)
-    const aIndices = a.tags.phase
-      .map((p) => phaseOrder.indexOf(p))
-      .filter((i) => i >= 0);
-    const bIndices = b.tags.phase
-      .map((p) => phaseOrder.indexOf(p))
-      .filter((i) => i >= 0);
-    const aPhase = aIndices.length > 0 ? Math.min(...aIndices) : END;
-    const bPhase = bIndices.length > 0 ? Math.min(...bIndices) : END;
+    let aPhase = END;
+    for (const p of a.tags.phase) {
+      const i = phaseIndex.get(p);
+      if (i !== undefined && i < aPhase) aPhase = i;
+    }
+    let bPhase = END;
+    for (const p of b.tags.phase) {
+      const i = phaseIndex.get(p);
+      if (i !== undefined && i < bPhase) bPhase = i;
+    }
     if (aPhase !== bPhase) return aPhase - bPhase;
 
     // Within same phase, sort by layer
-    const aLayer = layerOrder.indexOf(a.tags.layer);
-    const bLayer = layerOrder.indexOf(b.tags.layer);
+    const aLayer = layerIndex.get(a.tags.layer) ?? -1;
+    const bLayer = layerIndex.get(b.tags.layer) ?? -1;
     return aLayer - bLayer;
   });
 }
@@ -148,13 +181,15 @@ export function expandComposes(
   path: CatalogCard[],
   allCards: CatalogCard[]
 ): CatalogCard[] {
+  // Build lookup map once so each composes resolution is O(1) instead of O(N).
+  const cardBySkill = new Map(allCards.map((c) => [c.skill, c]));
   const inPath = new Set(path.map((c) => c.skill));
   const expanded: CatalogCard[] = [];
 
   for (const card of path) {
     for (const composed of card.composes) {
       if (!inPath.has(composed)) {
-        const found = allCards.find((c) => c.skill === composed);
+        const found = cardBySkill.get(composed);
         if (found) {
           expanded.push(found);
           inPath.add(composed);
