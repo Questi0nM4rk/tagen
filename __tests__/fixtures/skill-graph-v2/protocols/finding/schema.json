@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "finding",
+  "description": "A single review finding emitted by a domain reviewer subagent.",
+  "type": "object",
+  "required": ["file", "line"],
+  "properties": {
+    "file": {
+      "type": "string",
+      "description": "Repo-relative path to the file containing the finding."
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Line number in the file where the finding applies."
+    },
+    "description": {
+      "type": "string",
+      "description": "Imperative-mood description of the finding. No severity labels."
+    }
+  },
+  "additionalProperties": false
+}
