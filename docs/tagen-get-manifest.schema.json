@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://questi0nm4rk.dev/tagen/tagen-get-manifest.schema.json",
   "title": "TakenGetManifest",
   "description": "Output shape of `tagen get --json`. Stable contract — breaking changes require a dedicated PR and consumer update in lockstep.",
@@ -30,12 +30,12 @@
     "subagents": {
       "type": "array",
       "description": "Deduplicated resolved subagents referenced by the matched cards.",
-      "items": { "$ref": "#/$defs/ResolvedSubagent" }
+      "items": { "$ref": "#/definitions/ResolvedSubagent" }
     },
     "refs": {
       "type": "array",
       "description": "Reference files from slot-filling cards, tagged with the capability that filled the slot.",
-      "items": { "$ref": "#/$defs/ResolvedRef" }
+      "items": { "$ref": "#/definitions/ResolvedRef" }
     },
     "validators": {
       "type": "object",
@@ -46,12 +46,12 @@
         "protocol": {
           "type": "array",
           "description": "Auto-derived validators from skill-graph/protocols/<name>/validator.ts for each emitted/consumed protocol that has a validator.",
-          "items": { "$ref": "#/$defs/ResolvedProtocolValidator" }
+          "items": { "$ref": "#/definitions/ResolvedProtocolValidator" }
         },
         "card": {
           "type": "array",
           "description": "Card-level methodology validators from deep.validators on matched cards.",
-          "items": { "$ref": "#/$defs/ResolvedCardValidator" }
+          "items": { "$ref": "#/definitions/ResolvedCardValidator" }
         }
       }
     },
@@ -73,10 +73,10 @@
     "slots": {
       "type": "array",
       "description": "Resolved capability slots — one entry per capability needed by the composition.",
-      "items": { "$ref": "#/$defs/ResolvedSlot" }
+      "items": { "$ref": "#/definitions/ResolvedSlot" }
     }
   },
-  "$defs": {
+  "definitions": {
     "ResolvedSubagent": {
       "type": "object",
       "description": "A resolved subagent entry in the manifest.",
