@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import Ajv from "ajv/dist/2020";
+import Ajv from "ajv";
 import { filterCards, loadAllCards } from "../src/lib/catalog.ts";
 import type { Manifest } from "../src/lib/compose.ts";
 import { buildManifest, compose } from "../src/lib/compose.ts";
