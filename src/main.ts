@@ -125,6 +125,8 @@ function validateComposeQuery(
   }
 }
 
+const KNOWN_COMMANDS = new Set(["tags", "validate", "list", "demo", "get", "add"]);
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -132,6 +134,13 @@ async function main(): Promise<void> {
   if (!command || command === "--help" || command === "-h") {
     process.stdout.write(USAGE);
     return;
+  }
+
+  if (!KNOWN_COMMANDS.has(command)) {
+    process.stderr.write(
+      `Unknown command: ${command}\nRun 'tagen --help' for usage.\n`
+    );
+    process.exit(1);
   }
 
   const json = args.includes("--json");
@@ -188,11 +197,6 @@ async function main(): Promise<void> {
       runGet(cards, subagents, protocols, root, q, json);
       break;
     }
-    default:
-      process.stderr.write(
-        `Unknown command: ${command}\nRun 'tagen --help' for usage.\n`
-      );
-      process.exit(1);
   }
 }
 
