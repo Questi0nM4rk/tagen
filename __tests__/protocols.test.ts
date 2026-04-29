@@ -6,7 +6,10 @@ import {
   loadProtocols,
 } from "../src/lib/protocols.ts";
 
-const FIXTURES = join(import.meta.dir, "fixtures/skill-graph-v2");
+const FIXTURES = join(import.meta.dir, "fixtures/skill-graph");
+// Tests that exercise broken protocol directories use the parallel fixture
+// so the canonical one stays clean for `tagen validate` happy-path tests.
+const ISSUES_FIXTURES = join(import.meta.dir, "fixtures/skill-graph-with-issues");
 
 // ─── loadProtocols ────────────────────────────────────────────────────────────
 
@@ -58,25 +61,25 @@ describe("loadProtocols", () => {
   });
 
   test("incomplete protocol — hasSchema is false when schema.json absent", () => {
-    const result = loadProtocols(FIXTURES);
+    const result = loadProtocols(ISSUES_FIXTURES);
     const incomplete = result.find((p) => p.name === "incomplete-protocol");
     expect(incomplete?.hasSchema).toBe(false);
   });
 
   test("incomplete protocol — hasValidator is false when validator.ts absent", () => {
-    const result = loadProtocols(FIXTURES);
+    const result = loadProtocols(ISSUES_FIXTURES);
     const incomplete = result.find((p) => p.name === "incomplete-protocol");
     expect(incomplete?.hasValidator).toBe(false);
   });
 
   test("incomplete protocol — hasValidExamples is false when examples/valid/ absent", () => {
-    const result = loadProtocols(FIXTURES);
+    const result = loadProtocols(ISSUES_FIXTURES);
     const incomplete = result.find((p) => p.name === "incomplete-protocol");
     expect(incomplete?.hasValidExamples).toBe(false);
   });
 
   test("incomplete protocol — hasInvalidExamples is false when examples/invalid/ absent", () => {
-    const result = loadProtocols(FIXTURES);
+    const result = loadProtocols(ISSUES_FIXTURES);
     const incomplete = result.find((p) => p.name === "incomplete-protocol");
     expect(incomplete?.hasInvalidExamples).toBe(false);
   });
@@ -113,7 +116,7 @@ describe("isValidProtocol", () => {
   });
 
   test("returns true for the incomplete-protocol fixture", () => {
-    const protocols = loadProtocols(FIXTURES);
+    const protocols = loadProtocols(ISSUES_FIXTURES);
     expect(isValidProtocol(protocols, "incomplete-protocol")).toBe(true);
   });
 
@@ -131,7 +134,7 @@ describe("isValidProtocol", () => {
 
 describe("allProtocolNames", () => {
   test("returns names of all loaded protocols", () => {
-    const protocols = loadProtocols(FIXTURES);
+    const protocols = loadProtocols(ISSUES_FIXTURES);
     const names = allProtocolNames(protocols);
     expect(names).toContain("finding");
     expect(names).toContain("incomplete-protocol");

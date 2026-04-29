@@ -1,7 +1,7 @@
 Feature: tagen validate — catalog card consistency checks
 
   Scenario: valid catalog passes
-    Given a skill-graph with valid catalog cards
+    Given a skill-graph with catalog cards
     When I run "tagen validate"
     Then it exits 0
     And it prints "All N cards valid"
@@ -18,8 +18,6 @@ Feature: tagen validate — catalog card consistency checks
     Then it exits non-zero
     And it prints an error containing "unknown language value"
 
-  # ── v2 scenarios ─────────────────────────────────────────────────────────────
-
   Scenario: card with unknown capability in provides fails
     Given a catalog card with an unknown capability in provides
     When I run "tagen validate"
@@ -27,7 +25,7 @@ Feature: tagen validate — catalog card consistency checks
     And it prints an error containing "unknown capability in provides"
 
   Scenario: card with missing core.files path fails
-    Given a v2 card with a core.files entry that does not exist on disk
+    Given a card with a core.files entry that does not exist on disk
     When I run "tagen validate"
     Then it exits non-zero
     And it prints an error containing "path not found"
@@ -50,8 +48,20 @@ Feature: tagen validate — catalog card consistency checks
     Then it exits non-zero
     And it prints an error containing "unknown model"
 
-  Scenario: v1-only card passes with deprecation warnings
-    Given a v1-only catalog card with iron_laws and composes fields
+  Scenario: card without description hard-errors
+    Given a card whose frontmatter omits description
     When I run "tagen validate"
-    Then it exits 0
-    And it prints a deprecation warning
+    Then it exits non-zero
+    And it prints an error containing "missing required field: description"
+
+  Scenario: legacy composes field hard-errors
+    Given a card whose frontmatter contains 'composes'
+    When I run "tagen validate"
+    Then it exits non-zero
+    And it prints an error containing "legacy field 'composes'"
+
+  Scenario: legacy source field hard-errors
+    Given a card whose frontmatter contains 'source'
+    When I run "tagen validate"
+    Then it exits non-zero
+    And it prints an error containing "legacy field 'source'"

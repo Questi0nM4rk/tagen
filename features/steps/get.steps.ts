@@ -65,11 +65,11 @@ When<TaGenWorld>('I run "tagen get --language dotnet"', async (world: TaGenWorld
 });
 
 When<TaGenWorld>(
-  'I run "tagen get --card v2-strict-review --card v2-csharp-patterns --json"',
+  'I run "tagen get --card strict-review --card csharp-patterns --json"',
   async (world: TaGenWorld) => {
     if (!world.projectDir) throw new Error("projectDir not set");
     world.result = await runTagen(
-      ["get", "--card", "v2-strict-review", "--card", "v2-csharp-patterns", "--json"],
+      ["get", "--card", "strict-review", "--card", "csharp-patterns", "--json"],
       world.projectDir
     );
   }
@@ -126,8 +126,8 @@ Then<TaGenWorld>(
       modules?: string[];
     };
     const modules = manifest.modules ?? [];
-    expect(modules).toContain("v2-strict-review");
-    expect(modules).toContain("v2-csharp-patterns");
+    expect(modules).toContain("strict-review");
+    expect(modules).toContain("csharp-patterns");
     // No other cards should appear — the --card override restricts the set
     expect(modules.length).toBe(2);
   }

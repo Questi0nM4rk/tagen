@@ -1,5 +1,5 @@
 /**
- * validate.test.ts — unit tests for runValidate (v2-extended)
+ * validate.test.ts — unit tests for runValidate
  *
  * Exit-code / stderr capture approach:
  *   process.exit is mocked via `mock.module` is not available cleanly in bun:test for
@@ -27,7 +27,7 @@ import type {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const FIXTURES = join(import.meta.dir, "fixtures/skill-graph-v2");
+const FIXTURES = join(import.meta.dir, "fixtures/skill-graph");
 
 /** Minimal vocabulary that satisfies validateCard for known tag values. */
 function minimalVocab(): Vocabulary {
@@ -114,12 +114,12 @@ function validProtocol(name: string): ProtocolEntry {
   };
 }
 
-/** Minimal valid CatalogCard with all arrays empty, no deprecated fields. */
+/** Minimal valid CatalogCard. legacyFields defaults to empty for clean cards. */
 function minimalCard(skill: string): CatalogCard {
   return {
     skill,
-    plugin: "test-plugin",
-    source: "",
+    description: "A test card",
+    summary: [],
     tags: {
       phase: ["review"],
       domain: ["code-review"],
@@ -127,11 +127,6 @@ function minimalCard(skill: string): CatalogCard {
       layer: "methodology",
       concerns: [],
     },
-    composes: [],
-    enhances: [],
-    description: "A test card",
-    ironLaws: [],
-    summary: [],
     provides: [],
     requires: [],
     emits: [],
@@ -141,6 +136,7 @@ function minimalCard(skill: string): CatalogCard {
     deep: { subagents: [], refs: [], slots: {}, validators: [] },
     body: "",
     filePath: join(FIXTURES, "skills", `${skill}.md`),
+    legacyFields: [],
   };
 }
 
@@ -445,7 +441,7 @@ describe("runValidate", () => {
 
   // ── 13. Subagent name does not match filename stem ─────────────────────────
   test("13. subagent frontmatter name mismatches filename stem → error", () => {
-    // Uses v2-bad-name.md fixture: name='different-from-filename', file='v2-bad-name.md'
+    // Uses bad-name.md fixture: name='different-from-filename', file='bad-name.md'
     const sub: Subagent = {
       name: "different-from-filename",
       model: "haiku",
@@ -454,7 +450,7 @@ describe("runValidate", () => {
       emits: [],
       references: [],
       body: "",
-      filePath: join(FIXTURES, "subagents", "v2-bad-name.md"),
+      filePath: join(FIXTURES, "subagents", "bad-name.md"),
     };
     const result = runCapture(
       [],
@@ -466,7 +462,7 @@ describe("runValidate", () => {
     );
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("different-from-filename");
-    expect(result.stderr).toContain("v2-bad-name");
+    expect(result.stderr).toContain("bad-name");
     expect(result.stderr).toContain("does not match filename");
   });
 
@@ -476,14 +472,14 @@ describe("runValidate", () => {
   // past the type system — which is exactly what this test does.
   test("14. subagent with unknown model → error; confirm loader would have skipped it", () => {
     const sub = {
-      name: "v2-bad-model",
+      name: "bad-model",
       model: "gpt4", // not in VALID_MODELS — cast past SubagentModel
       description: "Test",
       consumes: [],
       emits: [],
       references: [],
       body: "",
-      filePath: join(FIXTURES, "subagents", "v2-bad-model.md"),
+      filePath: join(FIXTURES, "subagents", "bad-model.md"),
     } as unknown as Subagent;
 
     const result = runCapture(
@@ -498,7 +494,7 @@ describe("runValidate", () => {
     expect(result.stderr).toContain("gpt4");
     expect(result.stderr).toContain("unknown model");
     // The fixture file has model: gpt4 in its frontmatter, proving loadSubagents would skip it.
-    // If you loadSubagents(FIXTURES) the v2-bad-model entry is absent.
+    // If you loadSubagents(FIXTURES) the bad-model entry is absent.
   });
 
   // ── 15. Subagent consumes unknown protocol ─────────────────────────────────
@@ -535,29 +531,10 @@ describe("runValidate", () => {
     expect(result.stderr).toContain("unknown capability in references");
   });
 
-  // ── 17. Card with composes/enhances → deprecation warning, exit 0 ──────────
-  test("17. card with composes/enhances → deprecation warning, exit 0", () => {
-    const card = minimalCard("mike");
-    // composes references another card in the same set so no "unknown skill" error fires.
-    const card2 = minimalCard("november");
-    card.composes = ["november"];
-    const result = runCapture(
-      [card, card2],
-      minimalVocab(),
-      minimalCapabilities(),
-      [],
-      [],
-      FIXTURES
-    );
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("deprecated composes/enhances");
-  });
-
-  // ── 18. Card with iron_laws but no summary → deprecation warning ────────────
-  test("18. card with iron_laws but no summary → deprecation warning, exit 0", () => {
-    const card = minimalCard("oscar");
-    card.ironLaws = ["Test before code"];
-    card.summary = [];
+  // ── 17. Card with legacy 'composes' field → hard error ───────────────────
+  test("17. card.legacyFields contains 'composes' → hard error, exit 1", () => {
+    const card = minimalCard("legacy-card");
+    card.legacyFields = ["composes"];
     const result = runCapture(
       [card],
       minimalVocab(),
@@ -566,17 +543,15 @@ describe("runValidate", () => {
       [],
       FIXTURES
     );
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("deprecated iron_laws");
-    expect(result.stderr).toContain("summary:");
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("legacy field 'composes'");
+    expect(result.stderr).toContain("no longer supported");
   });
 
-  // ── 19. Card with source field → deprecation warning ──────────────────────
-  test("19. card with source field → deprecation warning, exit 0", () => {
-    // source must point to a real path so the existence check passes (otherwise it
-    // becomes an error, not just a warning). Use the vocabulary.yaml as a stand-in.
-    const card = minimalCard("papa");
-    card.source = "vocabulary.yaml"; // resolves to FIXTURES/vocabulary.yaml — exists
+  // ── 18. Card without description → hard error ────────────────────────────
+  test("18. card without description → hard error, exit 1", () => {
+    const card = minimalCard("no-desc");
+    card.description = "";
     const result = runCapture(
       [card],
       minimalVocab(),
@@ -585,8 +560,24 @@ describe("runValidate", () => {
       [],
       FIXTURES
     );
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("deprecated source:");
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("missing required field: description");
+  });
+
+  // ── 19. Card with legacy 'source' field → hard error ─────────────────────
+  test("19. card.legacyFields contains 'source' → hard error, exit 1", () => {
+    const card = minimalCard("src-card");
+    card.legacyFields = ["source"];
+    const result = runCapture(
+      [card],
+      minimalVocab(),
+      minimalCapabilities(),
+      [],
+      [],
+      FIXTURES
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("legacy field 'source'");
   });
 
   // ── 20. Duplicate card.skill → error ───────────────────────────────────────
