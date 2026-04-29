@@ -9,4 +9,4 @@ references: []
 
 # Bad Name Subagent
 
-This subagent exists solely to test name-vs-filename validation. The `name` field above does not match the filename `v2-bad-name.md`.
+Tests name-vs-filename validation; the `name` field above does not match the filename.

@@ -1,6 +1,5 @@
 ---
-skill: v2-strict-review
-plugin: qsm-strict-review
+skill: strict-review
 description: "Zero-tolerance PR/MR review — every finding is a required change, one tier, no partial approvals."
 tags:
   phase: [review]
@@ -10,8 +9,8 @@ tags:
   concerns: [review-automation, quality]
 provides: [review-methodology]
 requires: [language-patterns]
-emits: [graded-findings]
-consumes: [finding, recon-summary]
+emits: []
+consumes: [finding]
 surface:
   triggers:
     - "review PR"
@@ -21,7 +20,7 @@ core:
     - refs/workflow.md
 deep:
   subagents:
-    - v2-domain-reviewer
+    - domain-reviewer
   slots:
     language-patterns: true
   validators:

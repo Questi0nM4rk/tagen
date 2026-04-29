@@ -1,5 +1,5 @@
 ---
-name: v2-bad-model
+name: bad-model
 model: gpt4
 description: "Subagent with an unknown model value — used to test model validation."
 consumes: []
@@ -10,4 +10,3 @@ references: []
 # Bad Model Subagent
 
 This subagent exists solely to test model validation.
-The `model` field above (`gpt4`) is not a valid value; only `haiku`, `sonnet`, and `opus` are accepted.
