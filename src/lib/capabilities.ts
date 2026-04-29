@@ -24,18 +24,12 @@ import type { CapabilityRegistry } from "./types";
  */
 export function loadCapabilities(vaultDir: string): CapabilityRegistry {
   const path = join(vaultDir, "capabilities.yaml");
-  const exists = existsSync(path);
-  process.stderr.write(`DEBUG loadCapabilities path=${path} exists=${exists}\n`);
-  if (!exists) {
+  if (!existsSync(path)) {
     return { capabilities: {} };
   }
 
   const raw = readFileSync(path, "utf8");
-  process.stderr.write(`DEBUG loadCapabilities bytes=${raw.length}\n`);
   const parsed = parseYaml(raw) as unknown;
-  process.stderr.write(
-    `DEBUG loadCapabilities parsed=${JSON.stringify(parsed)?.slice(0, 200)}\n`
-  );
   const capabilities: Record<string, string> = {};
 
   if (parsed && typeof parsed === "object" && "capabilities" in parsed) {
