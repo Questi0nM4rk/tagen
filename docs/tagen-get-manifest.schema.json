@@ -1,0 +1,191 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://questi0nm4rk.dev/tagen/tagen-get-manifest.schema.json",
+  "title": "TakenGetManifest",
+  "description": "Output shape of `tagen get --json`. Stable contract — breaking changes require a dedicated PR and consumer update in lockstep.",
+  "type": "object",
+  "required": [
+    "modules",
+    "core",
+    "subagents",
+    "refs",
+    "validators",
+    "emits",
+    "consumes",
+    "warnings",
+    "slots"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "modules": {
+      "type": "array",
+      "description": "Skill names in the matched set, sorted alphabetically.",
+      "items": { "type": "string" }
+    },
+    "core": {
+      "type": "array",
+      "description": "Repo-relative paths to core-tier files, union across all matched cards.",
+      "items": { "type": "string" }
+    },
+    "subagents": {
+      "type": "array",
+      "description": "Deduplicated resolved subagents referenced by the matched cards.",
+      "items": { "$ref": "#/definitions/ResolvedSubagent" }
+    },
+    "refs": {
+      "type": "array",
+      "description": "Reference files from slot-filling cards, tagged with the capability that filled the slot.",
+      "items": { "$ref": "#/definitions/ResolvedRef" }
+    },
+    "validators": {
+      "type": "object",
+      "description": "Two-layer validator set: protocol validators (auto-applied) and card validators (opt-in).",
+      "required": ["protocol", "card"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": {
+          "type": "array",
+          "description": "Auto-derived validators from skill-graph/protocols/<name>/validator.ts for each emitted/consumed protocol that has a validator.",
+          "items": { "$ref": "#/definitions/ResolvedProtocolValidator" }
+        },
+        "card": {
+          "type": "array",
+          "description": "Card-level methodology validators from deep.validators on matched cards.",
+          "items": { "$ref": "#/definitions/ResolvedCardValidator" }
+        }
+      }
+    },
+    "emits": {
+      "type": "array",
+      "description": "Union of all protocols emitted across matched cards, sorted.",
+      "items": { "type": "string" }
+    },
+    "consumes": {
+      "type": "array",
+      "description": "Union of all protocols consumed across matched cards, sorted.",
+      "items": { "type": "string" }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Non-fatal composition warnings (unmet requires, unfilled slots, multiple providers). Agent decides whether to proceed.",
+      "items": { "type": "string" }
+    },
+    "slots": {
+      "type": "array",
+      "description": "Resolved capability slots — one entry per capability needed by the composition.",
+      "items": { "$ref": "#/definitions/ResolvedSlot" }
+    }
+  },
+  "definitions": {
+    "ResolvedSubagent": {
+      "type": "object",
+      "description": "A resolved subagent entry in the manifest.",
+      "required": ["name", "model", "prompt", "description", "consumes", "emits", "references"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Subagent name, matches filename stem in skill-graph/subagents/."
+        },
+        "model": {
+          "type": "string",
+          "enum": ["haiku", "sonnet", "opus"],
+          "description": "Dispatch model for this subagent."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Repo-relative path to the subagent prompt file."
+        },
+        "description": {
+          "type": "string",
+          "description": "One-line description of the subagent's role."
+        },
+        "consumes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Protocol names this subagent ingests. Empty means raw orchestrator context."
+        },
+        "emits": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Protocol names this subagent produces."
+        },
+        "references": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Capability names the subagent requires at dispatch via composition slots."
+        }
+      }
+    },
+    "ResolvedRef": {
+      "type": "object",
+      "description": "A reference file entry, tagged with the slot capability that provided it.",
+      "required": ["path", "slot"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Repo-relative path to the reference file."
+        },
+        "slot": {
+          "type": ["string", "null"],
+          "description": "Capability name that filled this slot, or null for card-owned refs."
+        }
+      }
+    },
+    "ResolvedProtocolValidator": {
+      "type": "object",
+      "description": "A protocol-level validator auto-applied for an emitted or consumed protocol.",
+      "required": ["protocol", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "description": "Protocol name this validator enforces."
+        },
+        "path": {
+          "type": "string",
+          "description": "Repo-relative path to the validator script."
+        }
+      }
+    },
+    "ResolvedCardValidator": {
+      "type": "object",
+      "description": "A card-level methodology validator from deep.validators.",
+      "required": ["module", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "type": "string",
+          "description": "Skill name of the card that owns this validator."
+        },
+        "path": {
+          "type": "string",
+          "description": "Repo-relative path to the validator script."
+        }
+      }
+    },
+    "ResolvedSlot": {
+      "type": "object",
+      "description": "A resolved capability slot in the composition.",
+      "required": ["capability", "fillerCard", "candidates"],
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "type": "string",
+          "description": "The capability name that this slot satisfies."
+        },
+        "fillerCard": {
+          "type": "string",
+          "description": "Skill name of the card chosen to fill this slot (alphabetical first among candidates)."
+        },
+        "candidates": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "All cards in the matched set that provide this capability. fillerCard is candidates[0] by alphabetical order."
+        }
+      }
+    }
+  }
+}

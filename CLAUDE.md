@@ -1,8 +1,10 @@
 # CLAUDE.md — tagen
 
-Standalone CLI for qsm-marketplace skill-graph assembly. Reads catalog cards and vocabulary from a calling project's `skill-graph/` directory; assembles CC-consumable plugins.
+Standalone read-only CLI for the qsm-marketplace skill-graph.
+Reads catalog cards, vocabulary, capabilities, protocols, and subagents from a calling project's
+`skill-graph/` directory and emits a JSON manifest naming everything the agent should load for a tag query.
 
-Extracted from qsm-marketplace `src/`. Published to npm as `tagen`.
+Spec: `docs/specs/SPEC-tagen.md`. Manifest contract: `docs/tagen-get-manifest.schema.json`.
 
 ---
 
@@ -10,33 +12,37 @@ Extracted from qsm-marketplace `src/`. Published to npm as `tagen`.
 
 | Command | Description |
 |---------|-------------|
-| `tagen list` | List all catalog cards; `--filter key=value` for tag filtering |
-| `tagen tags` | Print controlled vocabulary (all dimensions and valid values) |
-| `tagen resolve` | Resolve tag query to matching skills (agnostic included for language) |
-| `tagen validate` | Validate all catalog card tags against `vocabulary.yaml`; exits non-zero on any error |
-| `tagen sync` | Find `skill-graph/skills/*.md` files not registered in any build.yaml |
+| `tagen tags` | Print controlled vocabulary (tags + capabilities + protocols + subagents) |
+| `tagen validate` | Validate all cards, protocols, and subagents; non-zero exit on any error |
+| `tagen list` | List catalog cards; `--filter key=value` for tag filtering |
+| `tagen demo` | Preview a composition (matched cards + slot fills + warnings) |
+| `tagen get` | Resolve a composition into a JSON manifest (`--json`) |
 | `tagen add` | Scaffold a new catalog card interactively |
-| `tagen build` | Assemble plugins from catalog cards via tag queries in `build.yaml` |
-| `tagen diff` | Check if assembled plugin output matches current catalog content |
+
+All commands are read-only except `add`.
 
 ---
 
 ## Skill-Graph Discovery
 
-`findVaultDir()` walks up from `process.cwd()` up to 10 parent directories, looking for `skill-graph/vocabulary.yaml`. No config file needed — run `tagen` from anywhere inside a marketplace repo.
+`findVaultDir()` walks up from `process.cwd()` up to 10 parent directories, looking for
+`skill-graph/vocabulary.yaml`. No config file needed — run `tagen` from anywhere inside a marketplace repo.
 
 ---
 
 ## Development
 
 ```bash
-# Run tests (45+ tests across __tests__/)
+# Pin runtime via mise (.mise.toml in repo root)
+mise install               # ensures bun matches the pinned version
+
+# Run tests
 bun test
 
 # Typecheck
 bun run typecheck          # tsgo --noEmit
 
-# Build binary (GitHub releases)
+# Build standalone binary (GitHub releases)
 bun run build              # → bin/tagen
 
 # Build npm bundle (~250KB JS)
@@ -54,22 +60,24 @@ bun run src/main.ts <command>
 src/
 ├── main.ts                 # CLI entrypoint, arg parsing, command dispatch
 ├── commands/
-│   ├── add.ts              # tagen add
-│   ├── build.ts            # tagen build [--plugin <name>] [--all] [--no-bump]
-│   ├── diff.ts             # tagen diff [--plugin <name>] [--all]
-│   ├── list.ts             # tagen list [--filter key=value]
-│   ├── resolve.ts          # tagen resolve --phase X --language Y ...
-│   ├── sync.ts             # tagen sync
+│   ├── add.ts              # tagen add (interactive scaffold; only writer)
+│   ├── demo.ts             # tagen demo
+│   ├── get.ts              # tagen get
+│   ├── list.ts             # tagen list
 │   ├── tags.ts             # tagen tags
 │   └── validate.ts         # tagen validate
-└── lib/
-    ├── types.ts            # CatalogCard, BuildQuery, PluginManifest, VocabularyFile
-    ├── catalog.ts          # findVaultDir(), loadCatalog(), loadVocabulary(), loadBuildYaml()
-    ├── build-utils.ts      # strictFilterCards(), computeHash(), generateSkillMd(), writePlugin()
-    └── vocabulary.ts       # validateCard(), dimension rules, known required fields
+├── lib/
+│   ├── types.ts            # CatalogCard, Subagent, Manifest, Vocabulary, …
+│   ├── catalog.ts          # findVaultDir(), loadAllCards(), filterCards()
+│   ├── vocabulary.ts       # loadVocabulary(), validateCard()
+│   ├── capabilities.ts     # loadCapabilities(), isValidCapability()
+│   ├── protocols.ts        # loadProtocols(), isValidProtocol()
+│   ├── subagents.ts        # loadSubagents()
+│   └── compose.ts          # compose(), buildManifest()
+└── validator-runtime.ts    # @questi0nm4rk/tagen/validator-runtime export
 ```
 
-Each command exports a `run<Name>(args: string[]): Promise<void>` function. `main.ts` dispatches by argv[2].
+Each command exports a `run<Name>(...): Promise<void> | void`. `main.ts` dispatches by argv[2].
 
 ---
 
@@ -78,16 +86,19 @@ Each command exports a `run<Name>(args: string[]): Promise<void>` function. `mai
 ```
 __tests__/
 ├── fixtures/
-│   ├── skill-graph/
-│   │   ├── vocabulary.yaml      # Minimal controlled vocabulary
-│   │   └── skills/              # 3-5 minimal catalog cards covering edge cases
-│   └── plugins/                 # Expected output for diff tests
-├── catalog.test.ts              # findVaultDir, loadCatalog, loadVocabulary
-├── build-utils.test.ts          # strictFilterCards, computeHash, generateSkillMd
-└── vocabulary.test.ts           # validateCard, required dimensions, unknown values
+│   └── skill-graph/             # canonical fixture (vocabulary, capabilities,
+│                                # protocols, skills, subagents)
+├── catalog.test.ts              # findVaultDir, loadAllCards
+├── vocabulary.test.ts           # validateCard, dimension rules
+├── capabilities.test.ts         # loadCapabilities
+├── protocols.test.ts            # loadProtocols
+├── subagents.test.ts            # loadSubagents
+├── compose.test.ts              # compose(), buildManifest()
+├── validate.test.ts             # full validate pipeline
+└── manifest-contract.test.ts    # `tagen get --json` against tagen-get-manifest.schema.json
 ```
 
-Tests use `__tests__/fixtures/` as the vault root — no real marketplace dependency.
+Tests use `__tests__/fixtures/skill-graph/` as the vault root — no real marketplace dependency.
 
 ---
 
@@ -95,57 +106,77 @@ Tests use `__tests__/fixtures/` as the vault root — no real marketplace depend
 
 ```
 features/
-├── build.feature                # Plugin assembly end-to-end
-├── validate.feature             # Tag validation rules
-├── resolve.feature              # Tag query resolution, agnostic inclusion
-└── diff.feature                 # Diff detects content changes
+├── tags.feature
+├── validate.feature
+├── list.feature
+├── demo.feature
+├── get.feature
+└── add.feature
 ```
 
-Uses `@questi0nm4rk/feats` BDD framework. Run with `bun test`.
+One `.feature` per command, full edge-matrix coverage. Uses `@questi0nm4rk/feats`. Run with `bun test`.
 
 ---
 
 ## Development Workflow
 
-1. Write a failing feature scenario or unit test
+1. Write a failing feature scenario (or unit test if internal-only)
 2. Implement the minimum to pass
 3. Run `bun test` — must be green
 4. Run `bun run typecheck` — must be clean
-5. Commit (conventional commits, see below)
+5. Commit (conventional commits)
 
-Never claim done if `bun test` or `bun run typecheck` have not been run green in the current session.
+Never claim done if `bun test` or `bun run typecheck` haven't been run green in the current session.
 
 ---
 
 ## Adding a Command
 
 1. Create `src/commands/<name>.ts`
-2. Export `export async function run<Name>(args: string[]): Promise<void>`
-3. Import and register in `src/main.ts` dispatch table
-4. Add test in `__tests__/<name>.test.ts`
-5. Add feature scenario in `features/<name>.feature` if behavior is user-facing
+2. Export `export async function run<Name>(args): Promise<void>` (or sync `void`)
+3. Register in `src/main.ts` dispatch
+4. Add `__tests__/<name>.test.ts` for unit coverage
+5. Add `features/<name>.feature` + `features/steps/<name>.steps.ts`
+
+---
+
+## Code Style — apply when writing AND reviewing
+
+Every file in `src/`, `__tests__/`, and `features/` must follow:
+
+- **Modular** — one file, one responsibility. Split by behaviour, not by size.
+- **Reusable** — shared helpers go in `src/lib/` (or `features/steps/common.steps.ts` for BDD); never copy-paste.
+- **KISS** — simplest construct that works. No premature abstraction, no factories wrapping a single call.
+- **DRY** — same shape in two places → extract.
+
+Reviews (including `/simplify`) enforce the same rules. Flag and fix:
+
+- Functions > ~50 lines or doing more than one thing → split.
+- Duplicated literals, regex, or string templates in 2+ files → shared helper.
+- Classes / wrappers around a single function call → unwrap.
+- Config-object parameters with > 4 fields when 2 positional args suffice.
+- Runtime assertions that re-check what the type system already proves.
+- Newly exported symbols with one caller → inline unless reuse is concrete.
 
 ---
 
 ## Key Design Decisions
 
-### Language filter: EXACT in build, inclusive in resolve
-- `tagen build` with `language: python` matches ONLY `language: python` cards.
-- `tagen resolve --language python` matches `language: python` OR `language: agnostic`.
-- Rationale: plugin assembly must be precise; discovery should surface agnostic skills.
+### Language filter — inclusive
+`tagen list/demo/get --language python` matches `python` OR `agnostic`.
+Single-string field; two specific languages → split into two cards.
 
-### Full rebuild, content-hash skip
-- Every `tagen build` run resolves all queries from scratch.
-- Writes are skipped if the content hash matches `.build-hash`.
-- No incremental mode — partial state is worse than a slow full pass.
+### Convention over configuration
+`tagen` finds the skill-graph by walking up from CWD looking for `skill-graph/vocabulary.yaml`.
+No `.tagenrc`, no `tagen.config.ts`.
 
 ### Vocabulary in marketplace, not in tagen
-- `vocabulary.yaml` lives in `skill-graph/vocabulary.yaml` in the calling project.
-- Tagen reads and validates against it; adding new tag values needs no tagen release.
+`vocabulary.yaml`, `capabilities.yaml`, `protocols/`, and `subagents/` all live under the
+marketplace's `skill-graph/`. Adding a new tag value, capability, protocol, or subagent never
+requires a tagen release.
 
-### No config file
-- Tagen finds the skill-graph by walking up from CWD.
-- No `.tagenrc`, no `tagen.config.ts`. Convention only.
+### Read-only by contract
+Every command except `add` is read-only. `tagen get` writes the manifest to stdout, warnings to stderr.
 
 ---
 
@@ -160,11 +191,11 @@ Strict profile enforced. No direct commits to main. All changes via PR.
 Conventional commits:
 
 ```
-feat: add tagen diff --watch mode
-fix: resolve handles missing concerns field gracefully
-refactor: extract computeHash to build-utils
-test: add vocabulary validation edge cases
-docs: update SPEC-002 with --no-bump flag
+feat: …
+fix: …
+refactor: …
+test: …
+docs: …
 ```
 
 ---
@@ -177,3 +208,10 @@ npm publish                 # publishes with bin/tagen.js as the tagen bin
 ```
 
 Version in `package.json` is the source of truth for npm. Bump before publishing.
+
+---
+
+## AI Guardrails - Code Standards
+
+This project uses [ai-guardrails](https://github.com/Questi0nM4rk/ai-guardrails) for pedantic code enforcement.
+Pre-commit hooks auto-fix formatting, then run security scans, linting, and type checks.
