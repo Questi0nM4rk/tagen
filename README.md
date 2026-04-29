@@ -1,6 +1,6 @@
 # tagen
 
-Skill-graph CLI for qsm-marketplace: resolve tag queries, assemble plugins, validate vocabulary.
+Skill-graph CLI for qsm-marketplace: resolve tag queries, compose skills into a JSON manifest, validate vocabulary.
 
 [![npm version](https://img.shields.io/npm/v/%40questi0nm4rk%2Ftagen)](https://www.npmjs.com/package/@questi0nm4rk/tagen)
 [![CI](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml/badge.svg)](https://github.com/Questi0nM4rk/tagen/actions)
@@ -22,16 +22,13 @@ npm install -g @questi0nm4rk/tagen
 
 | Command | Example | Description |
 |---------|---------|-------------|
+| `tags` | `tagen tags` | Print controlled vocabulary |
+| `validate` | `tagen validate` | Check all cards, protocols, and subagents against vocabulary |
 | `list` | `tagen list` | List all catalog cards |
 | `list` | `tagen list --filter language=python` | Filter by tag |
-| `tags` | `tagen tags` | Print controlled vocabulary |
-| `resolve` | `tagen resolve --phase implementation --language typescript` | Match skills by tag query |
-| `validate` | `tagen validate` | Check all card tags against vocabulary.yaml |
-| `sync` | `tagen sync` | Find skill files not registered in build.yaml |
-| `add` | `tagen add` | Scaffold a new catalog card |
-| `build` | `tagen build --plugin qsm-python-lang` | Assemble a plugin from tag queries |
-| `build` | `tagen build --all` | Assemble all plugins |
-| `diff` | `tagen diff --all` | Check if plugin output is in sync with catalog |
+| `demo` | `tagen demo --language dotnet` | Preview a composition (matched cards + slot fills + warnings) |
+| `get` | `tagen get --language dotnet --json` | Resolve a composition into a JSON manifest |
+| `add` | `tagen add` | Scaffold a new catalog card interactively |
 
 ---
 
@@ -42,7 +39,7 @@ In a marketplace repo:
 ```json
 {
   "devDependencies": {
-    "tagen": "latest"
+    "@questi0nm4rk/tagen": "latest"
   }
 }
 ```
@@ -50,17 +47,18 @@ In a marketplace repo:
 ```bash
 bun install
 bunx tagen validate
-bunx tagen build --all
-bunx tagen diff --all     # CI gate: exits non-zero if output is stale
+bunx tagen get --domain code-review --language dotnet --json
 ```
 
 ---
 
 ## How It Works
 
-Tagen walks up from `cwd` to find `skill-graph/vocabulary.yaml`. No config file needed. Catalog cards live in `skill-graph/skills/*.md`. Plugins are assembled from `plugins/<name>/build.yaml` tag queries.
+Tagen walks up from `cwd` to find `skill-graph/vocabulary.yaml`. No config file needed.
+Catalog cards live in `skill-graph/skills/*.md`. The agent calls `tagen get` to resolve a
+composition into a JSON manifest naming brain files, subagents, and validators to load.
 
-See [docs/specs/](docs/specs/) for architecture decisions.
+See [docs/specs/SPEC-tagen.md](docs/specs/SPEC-tagen.md) for the full spec.
 
 ---
 
