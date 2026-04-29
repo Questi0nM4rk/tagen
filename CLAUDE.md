@@ -86,13 +86,19 @@ Each command exports a `run<Name>(...): Promise<void> | void`. `main.ts` dispatc
 ```
 __tests__/
 ├── fixtures/
-│   └── skill-graph/             # canonical fixture (vocabulary, capabilities,
-│                                # protocols, skills, subagents)
-├── catalog.test.ts              # findVaultDir, loadAllCards
+│   ├── skill-graph/             # canonical clean fixture (vocabulary,
+│   │                            # capabilities, protocols, skills, subagents)
+│   ├── skill-graph-with-issues/ # parallel fixture for tests that need
+│   │                            # intentionally-broken inputs (incomplete
+│   │                            # protocol dir, bad-name / bad-model subagents)
+│   └── brain/                   # stubs satisfying core.files / deep.refs /
+│                                # deep.validators path checks for the canonical
+│                                # fixture's strict-review and csharp-patterns
+├── catalog.test.ts              # findVaultDir, loadAllCards, legacyFields
 ├── vocabulary.test.ts           # validateCard, dimension rules
 ├── capabilities.test.ts         # loadCapabilities
-├── protocols.test.ts            # loadProtocols
-├── subagents.test.ts            # loadSubagents
+├── protocols.test.ts            # loadProtocols (uses both fixtures)
+├── subagents.test.ts            # loadSubagents (uses both fixtures)
 ├── compose.test.ts              # compose(), buildManifest()
 ├── validate.test.ts             # full validate pipeline
 └── manifest-contract.test.ts    # `tagen get --json` against tagen-get-manifest.schema.json
