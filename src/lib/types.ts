@@ -23,54 +23,24 @@ export interface DeepTier {
 
 export interface CatalogCard {
   skill: string;
-  plugin: string;
-  /**
-   * v1 field — kept for backward compat. v2 cards may omit this; module
-   * root resolves by convention to brain/<skill>/ when absent.
-   */
-  source: string;
-  tags: TagSet;
-  /** v1 relationships — deprecated, kept so v1 cards still parse. */
-  composes: string[];
-  /** v1 relationships — deprecated. */
-  enhances: string[];
   description: string;
-  /** v1 summary field. Cards may use either iron_laws (v1) or summary (v2). */
-  ironLaws: string[];
-  /** v2 summary field. One line per iron law, short. */
   summary: string[];
-  /** v2: capabilities this card provides to a composition. */
+  tags: TagSet;
   provides: string[];
-  /** v2: capabilities this card needs from the composition. */
   requires: string[];
-  /** v2: protocols this card emits (outputs). */
   emits: string[];
-  /** v2: protocols this card consumes (inputs). */
   consumes: string[];
-  /** v2 tier 1 — discovery. */
   surface: SurfaceTier;
-  /** v2 tier 2 — always loaded on activation. */
   core: CoreTier;
-  /** v2 tier 3 — loaded for subagent dispatch. */
   deep: DeepTier;
   body: string;
   filePath: string;
-}
-
-export interface BuildQuery {
-  tags: Partial<Record<keyof TagSet, string | string[]>>;
-}
-
-export interface BuildConfig {
-  name: string;
-  version: string;
-  description: string;
-  author: { name: string };
-  keywords: string[];
-  queries: BuildQuery[];
-  include: string[];
-  exclude: string[];
-  hooks?: string;
+  /**
+   * Legacy v1 frontmatter keys present in the file. Empty for clean v2 cards.
+   * Populated by parseCard; consumed by `tagen validate` to hard-error per
+   * SPEC-tagen Legacy field rejection. Not part of the manifest contract.
+   */
+  legacyFields: string[];
 }
 
 export interface VocabularyDimension {
@@ -111,15 +81,4 @@ export interface Subagent {
   references: string[];
   body: string;
   filePath: string;
-}
-
-export interface ResolvedPath {
-  filters: Record<string, string[]>;
-  path: Array<{
-    skill: string;
-    layer: string;
-    source: string;
-    description: string;
-    expanded: boolean;
-  }>;
 }

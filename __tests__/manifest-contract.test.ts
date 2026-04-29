@@ -8,7 +8,7 @@ import { buildManifest, compose } from "../src/lib/compose.ts";
 import { loadProtocols } from "../src/lib/protocols.ts";
 import { loadSubagents } from "../src/lib/subagents.ts";
 
-const FIXTURES = join(import.meta.dir, "fixtures/skill-graph-v2");
+const FIXTURES = join(import.meta.dir, "fixtures/skill-graph");
 const SCHEMA_PATH = join(import.meta.dir, "../docs/tagen-get-manifest.schema.json");
 
 let manifest: Manifest;
@@ -21,7 +21,7 @@ beforeAll(() => {
   const protocols = loadProtocols(FIXTURES);
 
   // Compose using the v2 fixture cards (domain=code-review matches both
-  // v2-strict-review and v2-csharp-patterns). repoRoot=FIXTURES makes all
+  // strict-review and csharp-patterns). repoRoot=FIXTURES makes all
   // paths fixture-relative, which is deterministic across machines.
   const v2Cards = filterCards(cards, { domain: ["code-review"] });
   const comp = compose(v2Cards, subagents, { domain: "code-review" });
@@ -35,8 +35,8 @@ beforeAll(() => {
 
 describe("manifest contract — positive", () => {
   test("manifest includes both v2 fixture modules", () => {
-    expect(manifest.modules).toContain("v2-strict-review");
-    expect(manifest.modules).toContain("v2-csharp-patterns");
+    expect(manifest.modules).toContain("strict-review");
+    expect(manifest.modules).toContain("csharp-patterns");
   });
 
   test("manifest validates against tagen-get-manifest.schema.json", () => {
@@ -67,21 +67,21 @@ describe("manifest contract — positive", () => {
     expect(Array.isArray(manifest.validators.card)).toBe(true);
   });
 
-  test("language-patterns slot is resolved by v2-csharp-patterns", () => {
+  test("language-patterns slot is resolved by csharp-patterns", () => {
     const slot = manifest.slots.find((s) => s.capability === "language-patterns");
     expect(slot).toBeDefined();
-    expect(slot?.fillerCard).toBe("v2-csharp-patterns");
-    expect(slot?.candidates).toContain("v2-csharp-patterns");
+    expect(slot?.fillerCard).toBe("csharp-patterns");
+    expect(slot?.candidates).toContain("csharp-patterns");
   });
 
-  test("v2-domain-reviewer subagent is resolved with correct model", () => {
-    const sub = manifest.subagents.find((s) => s.name === "v2-domain-reviewer");
+  test("domain-reviewer subagent is resolved with correct model", () => {
+    const sub = manifest.subagents.find((s) => s.name === "domain-reviewer");
     expect(sub).toBeDefined();
     expect(sub?.model).toBe("sonnet");
   });
 
   test("ResolvedSubagent has all required fields", () => {
-    const sub = manifest.subagents.find((s) => s.name === "v2-domain-reviewer");
+    const sub = manifest.subagents.find((s) => s.name === "domain-reviewer");
     expect(typeof sub?.name).toBe("string");
     expect(typeof sub?.model).toBe("string");
     expect(typeof sub?.prompt).toBe("string");
@@ -91,14 +91,14 @@ describe("manifest contract — positive", () => {
     expect(Array.isArray(sub?.references)).toBe(true);
   });
 
-  test("finding protocol validator is included (v2-strict-review consumes finding)", () => {
+  test("finding protocol validator is included (strict-review consumes finding)", () => {
     const pv = manifest.validators.protocol.find((v) => v.protocol === "finding");
     expect(pv).toBeDefined();
     expect(pv?.path).toMatch(/protocols\/finding\/validator\.ts$/);
   });
 
-  test("card validator is included for v2-strict-review", () => {
-    const cv = manifest.validators.card.find((v) => v.module === "v2-strict-review");
+  test("card validator is included for strict-review", () => {
+    const cv = manifest.validators.card.find((v) => v.module === "strict-review");
     expect(cv).toBeDefined();
     expect(cv?.path).toMatch(/validators\/no-emoji\.ts$/);
   });
@@ -170,7 +170,7 @@ describe("manifest contract — negative", () => {
   test("slot with empty candidates array fails validation (minItems: 1)", () => {
     const badSlot = {
       capability: "language-patterns",
-      fillerCard: "v2-csharp-patterns",
+      fillerCard: "csharp-patterns",
       candidates: [],
     };
     const mutated = { ...manifest, slots: [badSlot] };

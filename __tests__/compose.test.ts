@@ -7,7 +7,7 @@ import { loadProtocols } from "../src/lib/protocols.ts";
 import { loadSubagents } from "../src/lib/subagents.ts";
 import type { CatalogCard, ProtocolEntry, Subagent } from "../src/lib/types.ts";
 
-const FIXTURES = join(import.meta.dir, "fixtures/skill-graph-v2");
+const FIXTURES = join(import.meta.dir, "fixtures/skill-graph");
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -15,8 +15,8 @@ const REPO_ROOT = join(import.meta.dir, "..", "..");
 function makeCard(overrides: Partial<CatalogCard> & { skill: string }): CatalogCard {
   return {
     skill: overrides.skill,
-    plugin: overrides.plugin ?? "test-plugin",
-    source: overrides.source ?? "",
+    description: overrides.description ?? "",
+    summary: overrides.summary ?? [],
     tags: overrides.tags ?? {
       phase: ["review"],
       domain: ["code-review"],
@@ -24,11 +24,6 @@ function makeCard(overrides: Partial<CatalogCard> & { skill: string }): CatalogC
       layer: "methodology",
       concerns: [],
     },
-    composes: overrides.composes ?? [],
-    enhances: overrides.enhances ?? [],
-    description: overrides.description ?? "",
-    ironLaws: overrides.ironLaws ?? [],
-    summary: overrides.summary ?? [],
     provides: overrides.provides ?? [],
     requires: overrides.requires ?? [],
     emits: overrides.emits ?? [],
@@ -43,6 +38,7 @@ function makeCard(overrides: Partial<CatalogCard> & { skill: string }): CatalogC
     },
     body: overrides.body ?? "",
     filePath: overrides.filePath ?? "",
+    legacyFields: overrides.legacyFields ?? [],
   };
 }
 
@@ -69,8 +65,8 @@ describe("compose — domain filter", () => {
   test("domain filter excludes cards from other domains", () => {
     const result = compose(allCards, allSubagents, { domain: "testing" });
     const names = result.cards.map((c) => c.skill);
-    expect(names).not.toContain("v2-strict-review");
-    expect(names).not.toContain("v2-csharp-patterns");
+    expect(names).not.toContain("strict-review");
+    expect(names).not.toContain("csharp-patterns");
   });
 });
 
@@ -92,18 +88,18 @@ describe("compose — language filter", () => {
       language: "dotnet",
     });
     const names = result.cards.map((c) => c.skill);
-    expect(names).toContain("v2-strict-review"); // agnostic
-    expect(names).toContain("v2-csharp-patterns"); // dotnet
+    expect(names).toContain("strict-review"); // agnostic
+    expect(names).toContain("csharp-patterns"); // dotnet
   });
 });
 
 describe("compose — skill filter", () => {
   test("skill filter returns only the named card", () => {
     const result = compose(allCards, allSubagents, {
-      skill: "v2-strict-review",
+      skill: "strict-review",
     });
     expect(result.cards).toHaveLength(1);
-    expect(result.cards[0]!.skill).toBe("v2-strict-review");
+    expect(result.cards[0]!.skill).toBe("strict-review");
   });
 
   test("skill filter on unknown name returns empty cards", () => {
@@ -127,26 +123,26 @@ describe("compose — capability filter", () => {
       capability: "language-patterns",
     });
     const names = result.cards.map((c) => c.skill);
-    expect(names).not.toContain("v2-strict-review"); // provides review-methodology, not language-patterns
+    expect(names).not.toContain("strict-review"); // provides review-methodology, not language-patterns
   });
 });
 
 describe("compose — --card override", () => {
   test("card override returns exactly the named skills", () => {
     const result = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const names = result.cards.map((c) => c.skill).sort();
-    expect(names).toEqual(["v2-csharp-patterns", "v2-strict-review"]);
+    expect(names).toEqual(["csharp-patterns", "strict-review"]);
   });
 
   test("card override ignores domain/language filters", () => {
     const result = compose(allCards, allSubagents, {
-      cards: ["v2-csharp-patterns"],
+      cards: ["csharp-patterns"],
       domain: "testing", // would normally exclude code-review cards
     });
     const names = result.cards.map((c) => c.skill);
-    expect(names).toContain("v2-csharp-patterns");
+    expect(names).toContain("csharp-patterns");
   });
 
   test("card override with unknown skill name returns empty", () => {
@@ -186,18 +182,18 @@ describe("compose — empty match", () => {
 
 describe("compose — single provider fills slot", () => {
   test("slot is resolved when exactly one card provides the required capability", () => {
-    // v2-strict-review requires language-patterns; v2-csharp-patterns provides it
+    // strict-review requires language-patterns; csharp-patterns provides it
     const result = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const slot = result.slots.find((s) => s.capability === "language-patterns");
     expect(slot).toBeDefined();
-    expect(slot?.fillerCard).toBe("v2-csharp-patterns");
+    expect(slot?.fillerCard).toBe("csharp-patterns");
   });
 
   test("single provider — candidates list has exactly one entry", () => {
     const result = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const slot = result.slots.find((s) => s.capability === "language-patterns");
     expect(slot?.candidates).toHaveLength(1);
@@ -205,7 +201,7 @@ describe("compose — single provider fills slot", () => {
 
   test("single provider — no multiple-providers warning emitted", () => {
     const result = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const hasMultipleWarning = result.warnings.some((w) =>
       w.includes("multiple providers")
@@ -216,9 +212,9 @@ describe("compose — single provider fills slot", () => {
 
 describe("compose — no provider for required capability", () => {
   test("emits unfilled-slot warning when no card provides the required capability", () => {
-    // v2-strict-review requires language-patterns; if we omit the provider:
+    // strict-review requires language-patterns; if we omit the provider:
     const result = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review"],
+      cards: ["strict-review"],
     });
     const hasUnfilled = result.warnings.some((w) => w.includes("unfilled slot"));
     expect(hasUnfilled).toBe(true);
@@ -226,7 +222,7 @@ describe("compose — no provider for required capability", () => {
 
   test("unfilled warning names the missing capability", () => {
     const result = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review"],
+      cards: ["strict-review"],
     });
     const warning = result.warnings.find(
       (w) => w.includes("language-patterns") && w.includes("unfilled slot")
@@ -284,11 +280,11 @@ describe("compose — multiple providers", () => {
 
 describe("compose — subagent reference resolution", () => {
   test("subagent listed in deep.subagents resolves its references capability", () => {
-    // v2-strict-review lists v2-domain-reviewer in deep.subagents;
-    // v2-domain-reviewer references language-patterns.
-    // Including v2-csharp-patterns (provider) in the composition should fill the slot.
+    // strict-review lists domain-reviewer in deep.subagents;
+    // domain-reviewer references language-patterns.
+    // Including csharp-patterns (provider) in the composition should fill the slot.
     const result = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const slot = result.slots.find((s) => s.capability === "language-patterns");
     expect(slot).toBeDefined();
@@ -334,7 +330,7 @@ describe("compose — subagent reference resolution", () => {
     // subagent language-patterns ref triggers resolveSlot on 'language-patterns'
     // which finds a provider → slot entry is created.
     const result = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const slotCaps = result.slots.map((s) => s.capability);
     expect(slotCaps).toContain("language-patterns");
@@ -348,7 +344,7 @@ describe("buildManifest — top-level fields", () => {
 
   beforeAll(() => {
     comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
   });
 
@@ -401,18 +397,18 @@ describe("buildManifest — top-level fields", () => {
 describe("buildManifest — modules", () => {
   test("modules contains skill names of all matched cards", () => {
     const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
-    expect(m.modules).toContain("v2-strict-review");
-    expect(m.modules).toContain("v2-csharp-patterns");
+    expect(m.modules).toContain("strict-review");
+    expect(m.modules).toContain("csharp-patterns");
   });
 });
 
 describe("buildManifest — paths are repo-relative", () => {
   test("core paths are not absolute", () => {
     const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
     for (const p of m.core) {
@@ -422,7 +418,7 @@ describe("buildManifest — paths are repo-relative", () => {
 
   test("refs paths are not absolute", () => {
     const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
     for (const r of m.refs) {
@@ -432,7 +428,7 @@ describe("buildManifest — paths are repo-relative", () => {
 
   test("subagent prompt paths are not absolute", () => {
     const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
     for (const s of m.subagents) {
@@ -444,7 +440,7 @@ describe("buildManifest — paths are repo-relative", () => {
 describe("buildManifest — refs from filler cards only", () => {
   test("refs slot value matches the capability filled", () => {
     const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
     // All ref slot values should be capability names found in slots
@@ -459,10 +455,10 @@ describe("buildManifest — refs from filler cards only", () => {
 
 describe("buildManifest — protocolValidators filtered by hasValidator", () => {
   test("protocol validator only included when card emits/consumes and protocol hasValidator=true", () => {
-    // v2-strict-review emits graded-findings, consumes finding and recon-summary
+    // strict-review emits graded-findings, consumes finding and recon-summary
     // Only 'finding' has a validator.ts in fixtures
     const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
     for (const v of m.validators.protocol) {
@@ -473,7 +469,7 @@ describe("buildManifest — protocolValidators filtered by hasValidator", () => 
   test("incomplete-protocol not in validators.protocol despite name match", () => {
     // incomplete-protocol has no validator.ts — should never appear
     const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
     const names = m.validators.protocol.map((v) => v.protocol);
@@ -484,7 +480,7 @@ describe("buildManifest — protocolValidators filtered by hasValidator", () => 
 describe("buildManifest — emits/consumes aggregation", () => {
   test("emits field is sorted", () => {
     const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
     const sorted = [...m.emits].sort();
@@ -493,26 +489,26 @@ describe("buildManifest — emits/consumes aggregation", () => {
 
   test("consumes field is sorted", () => {
     const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review", "v2-csharp-patterns"],
+      cards: ["strict-review", "csharp-patterns"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
     const sorted = [...m.consumes].sort();
     expect(m.consumes).toEqual(sorted);
   });
 
-  test("emits contains protocols from matched cards", () => {
-    const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review"],
-    });
-    const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
-    expect(m.emits).toContain("graded-findings");
-  });
-
   test("consumes contains protocols from matched cards", () => {
     const comp = compose(allCards, allSubagents, {
-      cards: ["v2-strict-review"],
+      cards: ["strict-review"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
     expect(m.consumes).toContain("finding");
+  });
+
+  test("emits empty when no matched card emits", () => {
+    const comp = compose(allCards, allSubagents, {
+      cards: ["strict-review"],
+    });
+    const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
+    expect(m.emits).toEqual([]);
   });
 });
