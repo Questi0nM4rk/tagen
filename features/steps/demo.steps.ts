@@ -326,3 +326,16 @@ Then<TaGenWorld>(
     expect(stderr).toContain("unknown language value");
   }
 );
+
+Then<TaGenWorld>(
+  "it prints the slot-fill OK marker for csharp-patterns",
+  (world: TaGenWorld) => {
+    const stdout = world.result?.stdout ?? "";
+    expect(stdout).toContain("OK (filled by csharp-patterns)");
+  }
+);
+
+Then<TaGenWorld>("it prints a Context line", (world: TaGenWorld) => {
+  const stdout = world.result?.stdout ?? "";
+  expect(stdout).toMatch(/Context:\s+core\s+\d+\s+files?/);
+});

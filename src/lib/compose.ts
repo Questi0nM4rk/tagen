@@ -191,15 +191,6 @@ export function buildManifest(
   // modules — skill names only.
   const modules = comp.cards.map((c) => c.skill);
 
-  // core — union of all matched cards' core.files, repo-relative.
-  const core: string[] = [];
-  for (const c of comp.cards) {
-    const brainPath = join(repoRoot, "brain", c.skill);
-    for (const f of c.core.files) {
-      core.push(rel(repoRoot, join(brainPath, f)));
-    }
-  }
-
   // subagents — deduped across cards; prompt is repo-relative.
   const subRefs: ResolvedSubagent[] = [];
   const seenSubs = new Set<string>();
@@ -221,19 +212,37 @@ export function buildManifest(
     }
   }
 
-  // refs — filler-card deep.refs tagged with slot capability. Non-chosen
-  // candidates do not contribute refs (they appear in slots[].candidates only).
-  const refs: ResolvedRef[] = [];
-  const cardBySkill = new Map(comp.cards.map((c) => [c.skill, c]));
+  // Route content per SPEC-tagen "Composition resolution algorithm" step 9.
+  // Build cardSkill → fillerSlots[] from comp.slots; each matched card C goes
+  // to exactly one bucket: non-filler → manifest.core[] (for core.files) and
+  // manifest.refs[] with slot:null (for deep.refs); filler → all of C's
+  // core.files ∪ deep.refs become refs[] entries tagged with each slot
+  // capability C fills (one entry per (path, slot) pair).
+  const fillerSlotsByCard = new Map<string, string[]>();
   for (const slot of comp.slots) {
-    const filler = cardBySkill.get(slot.fillerCard);
-    if (!filler) continue;
-    const brainPath = join(repoRoot, "brain", filler.skill);
-    for (const r of filler.deep.refs) {
-      refs.push({
-        path: rel(repoRoot, join(brainPath, r)),
-        slot: slot.capability,
-      });
+    const list = fillerSlotsByCard.get(slot.fillerCard) ?? [];
+    list.push(slot.capability);
+    fillerSlotsByCard.set(slot.fillerCard, list);
+  }
+
+  const core: string[] = [];
+  const refs: ResolvedRef[] = [];
+  for (const c of comp.cards) {
+    const brainPath = join(repoRoot, "brain", c.skill);
+    const fillerSlots = fillerSlotsByCard.get(c.skill);
+    if (!fillerSlots || fillerSlots.length === 0) {
+      for (const f of c.core.files) core.push(rel(repoRoot, join(brainPath, f)));
+      for (const r of c.deep.refs) {
+        refs.push({ path: rel(repoRoot, join(brainPath, r)), slot: null });
+      }
+      continue;
+    }
+    const allPaths = [...c.core.files, ...c.deep.refs];
+    for (const p of allPaths) {
+      const repoRel = rel(repoRoot, join(brainPath, p));
+      for (const cap of fillerSlots) {
+        refs.push({ path: repoRel, slot: cap });
+      }
     }
   }
 

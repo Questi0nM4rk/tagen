@@ -1,4 +1,4 @@
-import { type ComposeQuery, compose } from "../lib/compose";
+import { type ComposeQuery, type Composition, compose } from "../lib/compose";
 import type { CatalogCard, Subagent, SubagentModel } from "../lib/types";
 
 export interface DemoOptions {
@@ -30,10 +30,11 @@ export function runDemo(
 
   process.stdout.write(`  Modules: ${comp.cards.map((c) => c.skill).join(", ")}\n\n`);
 
-  printCapabilities(comp.cards);
+  printCapabilities(comp);
   printSlots(comp);
   printProtocols(comp.cards);
   printSubagentSummary(comp.cards, subagents);
+  printContext(comp.cards, subagents);
   printWarnings(comp.warnings);
 
   if (opts.verbose) {
@@ -53,12 +54,23 @@ function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort();
 }
 
-function printCapabilities(cards: CatalogCard[]): void {
-  const provided = uniqueSorted(cards.flatMap((c) => c.provides));
-  const required = uniqueSorted(cards.flatMap((c) => c.requires));
+function printCapabilities(comp: Composition): void {
+  const provided = uniqueSorted(comp.cards.flatMap((c) => c.provides));
+  const required = uniqueSorted(comp.cards.flatMap((c) => c.requires));
+  const fillerByCap = new Map(comp.slots.map((s) => [s.capability, s.fillerCard]));
   process.stdout.write("  Capabilities:\n");
   process.stdout.write(`    provided: ${provided.join(", ") || "(none)"}\n`);
-  process.stdout.write(`    required: ${required.join(", ") || "(none)"}\n\n`);
+  if (required.length === 0) {
+    process.stdout.write("    required: (none)\n\n");
+    return;
+  }
+  const annotated = required
+    .map((cap) => {
+      const filler = fillerByCap.get(cap);
+      return filler ? `${cap} OK (filled by ${filler})` : `${cap} UNMET`;
+    })
+    .join(", ");
+  process.stdout.write(`    required: ${annotated}\n\n`);
 }
 
 function printSlots(comp: {
@@ -96,6 +108,36 @@ function printSubagentSummary(cards: CatalogCard[], subagents: Subagent[]): void
     .join(", ");
   process.stdout.write(
     `  Subagents: ${matched.length} total${breakdown ? ` (${breakdown})` : ""}\n\n`
+  );
+}
+
+// Token estimates: ~500/core file, ~2000/subagent, ~500/ref. Back-of-envelope
+// from SPEC tier semantics; see #17. Rough enough that "~2500 tok" reads as a
+// budget hint rather than a billing line — the agent uses it to plan, not to
+// gate on.
+const TOK_PER_CORE = 500;
+const TOK_PER_SUBAGENT = 2000;
+const TOK_PER_REF = 500;
+const TOK_PER_VALIDATOR = 0;
+
+function printContext(cards: CatalogCard[], subagents: Subagent[]): void {
+  let coreFiles = 0;
+  let refs = 0;
+  let validators = 0;
+  for (const c of cards) {
+    coreFiles += c.core.files.length;
+    refs += c.deep.refs.length;
+    validators += c.deep.validators.length;
+  }
+  const subagentNames = new Set(cards.flatMap((c) => c.deep.subagents));
+  const subagentCount = subagents.filter((s) => subagentNames.has(s.name)).length;
+  const coreTok = coreFiles * TOK_PER_CORE;
+  const deepTok =
+    subagentCount * TOK_PER_SUBAGENT +
+    refs * TOK_PER_REF +
+    validators * TOK_PER_VALIDATOR;
+  process.stdout.write(
+    `  Context: core ${coreFiles} ${coreFiles === 1 ? "file" : "files"} (~${coreTok} tok), deep ${subagentCount} subagents + ${refs} refs + ${validators} validators (~${deepTok} tok)\n\n`
   );
 }
 
