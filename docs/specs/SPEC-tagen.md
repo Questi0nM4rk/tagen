@@ -496,7 +496,7 @@ Field reference:
 | `surface.triggers` | `string[]` | no | Phrases that suggest this card |
 | `core.files` | `path[]` | no | Paths relative to `brain/<skill>/`. Routing depends on the card's role in the composition (see Composition resolution algorithm step 9): non-filler card → `manifest.core[]`; chosen filler card → `manifest.refs[]` tagged with the slot capability. |
 | `deep.subagents` | `string[]` | no | Subagent names; tagen resolves each from `skill-graph/subagents/` |
-| `deep.refs` | `path[]` | no | Additional card-owned refs (paths relative to `brain/<skill>/`). Routing matches `core.files`: non-filler → `manifest.refs[]` with `slot: null`; chosen filler → tagged with the slot capability. |
+| `deep.refs` | `path[]` | no | Additional card-owned refs (paths relative to `brain/<skill>/`). Routing follows the same role-based rules as `core.files`: non-filler card → added to `manifest.refs[]` with `slot: null`; chosen filler card → added to `manifest.refs[]` tagged with the slot capability. |
 | `deep.slots` | `Record<capability, true>` | no | Slots filled by any matched card providing that capability |
 | `deep.validators` | `path[]` | no | Card-level validator scripts |
 
@@ -581,7 +581,16 @@ files were loaded as the methodology's own context vs which were pulled in to fi
 named capability slot. That distinction drives prompt budgeting, slot debugging, and
 the `--card` override workflow.
 
-Rule of thumb:
+Routing truth table — what determines where each card's content lands:
+
+| Card matched? | Card fills a slot? | `core.files` routed to | `deep.refs` routed to |
+|---------------|--------------------|------------------------|----------------------|
+| no            | n/a                | (not loaded)           | (not loaded) |
+| yes           | no                 | `manifest.core[]`      | `manifest.refs[]` with `slot: null` |
+| yes           | yes (one slot)     | `manifest.refs[]` with `slot: <cap>` | `manifest.refs[]` with `slot: <cap>` |
+| yes           | yes (multiple)     | `manifest.refs[]` once per slot, each tagged with that `<cap>` | `manifest.refs[]` once per slot, each tagged with that `<cap>` |
+
+Rule of thumb (reading the manifest):
 
 | Where a path appears | What it means |
 |----------------------|---------------|
@@ -608,6 +617,10 @@ card. It restricts the matched set to exactly the listed cards, bypassing tag-qu
 ## Commands
 
 Six commands. All read-only except `add`.
+
+The CLI also recognises `--version` (alias `-V`) before any subcommand. It prints the bundled
+`package.json` version to stdout and exits 0 without touching the skill-graph. This is the
+first-line answer to "what version" in any bug report or CI log.
 
 ### `tagen tags`
 
@@ -774,7 +787,7 @@ Breaking changes require a dedicated PR with consumers updated in lockstep.
     }
   ],
   "refs": [
-    { "path": "brain/csharp-patterns/refs/patterns.md", "slot": "language-patterns" }
+    { "path": "brain/csharp-patterns/refs/csharp-patterns.md", "slot": "language-patterns" }
   ],
   "slots": [
     {
@@ -803,6 +816,8 @@ Breaking changes require a dedicated PR with consumers updated in lockstep.
 ```
 
 JSON Schema lives at `docs/tagen-get-manifest.schema.json` and is enforced by a dedicated CI test on every PR.
+The schema is the **authoritative shape** of the manifest; the TypeScript interfaces below are a non-binding view of it.
+When schema and types drift, the schema wins and the types must be brought into line.
 
 Agent reads:
 - `core[]` files into context immediately — the methodology's own context, no slot relationship.
@@ -887,6 +902,7 @@ export interface ResolvedSubagent {
   name: string;
   model: SubagentModel;
   prompt: string;                          // repo-relative path
+  description: string;                     // mirrors the subagent's frontmatter description
   consumes: string[];
   emits: string[];
   references: string[];
