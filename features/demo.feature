@@ -36,3 +36,10 @@ Feature: tagen demo — preview composition matches, slots, and warnings
     When I run "tagen demo --domain code-review --verbose"
     Then it exits 0
     And it prints a resolution trace
+
+  Scenario: demo annotates filled requirement and prints Context line
+    Given a skill-graph with v2 cards that satisfy all requires
+    When I run "tagen demo --language dotnet"
+    Then it exits 0
+    And it prints the slot-fill OK marker for csharp-patterns
+    And it prints a Context line

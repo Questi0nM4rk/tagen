@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { runAdd } from "./commands/add";
 import { runDemo } from "./commands/demo";
 import { runGet } from "./commands/get";
@@ -163,12 +165,29 @@ function validateComposeQuery(
 
 const KNOWN_COMMANDS = new Set(["tags", "validate", "list", "demo", "get", "add"]);
 
+/**
+ * Read the bundled package.json's version field. Resolves relative to this
+ * compiled file so it works for both `bun run src/main.ts` and the bundled
+ * `bin/tagen.js` distribution.
+ */
+function readBundledVersion(): string {
+  const pkgPath = join(import.meta.dir, "..", "package.json");
+  const raw = readFileSync(pkgPath, "utf8");
+  const pkg = JSON.parse(raw) as { version?: string };
+  return pkg.version ?? "unknown";
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
 
   if (!command || command === "--help" || command === "-h") {
     process.stdout.write(USAGE);
+    return;
+  }
+
+  if (command === "--version" || command === "-V") {
+    process.stdout.write(`${readBundledVersion()}\n`);
     return;
   }
 

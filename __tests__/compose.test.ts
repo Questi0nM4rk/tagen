@@ -437,19 +437,125 @@ describe("buildManifest — paths are repo-relative", () => {
   });
 });
 
-describe("buildManifest — refs from filler cards only", () => {
-  test("refs slot value matches the capability filled", () => {
+describe("buildManifest — slot-filler content routing (SPEC step 9)", () => {
+  // Real fixture: strict-review (methodology, non-filler) + csharp-patterns
+  // (filler for language-patterns). Asserts the routing rule that filler
+  // content must NOT appear in core[] and non-filler core.files MUST appear in
+  // core[].
+  test("non-filler card's core.files land in manifest.core[]", () => {
     const comp = compose(allCards, allSubagents, {
       cards: ["strict-review", "csharp-patterns"],
     });
     const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
-    // All ref slot values should be capability names found in slots
-    const slotCaps = new Set(comp.slots.map((s) => s.capability));
-    for (const r of m.refs) {
-      if (r.slot !== null) {
-        expect(slotCaps.has(r.slot)).toBe(true);
-      }
-    }
+    expect(m.core.some((p) => p.endsWith("strict-review/refs/workflow.md"))).toBe(true);
+  });
+
+  test("filler card's core.files do NOT appear in manifest.core[]", () => {
+    const comp = compose(allCards, allSubagents, {
+      cards: ["strict-review", "csharp-patterns"],
+    });
+    const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
+    expect(m.core.some((p) => p.includes("csharp-patterns"))).toBe(false);
+  });
+
+  test("filler card's core.files appear in manifest.refs[] with the slot tag", () => {
+    const comp = compose(allCards, allSubagents, {
+      cards: ["strict-review", "csharp-patterns"],
+    });
+    const m = buildManifest(comp, allSubagents, allProtocols, REPO_ROOT);
+    const fillerRefs = m.refs.filter(
+      (r) => r.slot === "language-patterns" && r.path.includes("csharp-patterns")
+    );
+    expect(fillerRefs.length).toBeGreaterThan(0);
+  });
+
+  test("non-filler card's deep.refs become manifest.refs[] with slot:null", () => {
+    // Synthetic: a methodology card with deep.refs but no fillers.
+    const methodology = makeCard({
+      skill: "method",
+      provides: ["review-methodology"],
+      requires: [],
+      core: { files: ["refs/main.md"] },
+      deep: {
+        subagents: [],
+        refs: ["refs/extra.md"],
+        slots: {},
+        validators: [],
+      },
+    });
+    const comp = compose([methodology], [], { cards: ["method"] });
+    const m = buildManifest(comp, [], [], REPO_ROOT);
+    const nullSlotRefs = m.refs.filter((r) => r.slot === null);
+    expect(nullSlotRefs.length).toBe(1);
+    expect(nullSlotRefs[0]?.path).toMatch(/method\/refs\/extra\.md$/);
+    expect(m.core.some((p) => p.endsWith("method/refs/main.md"))).toBe(true);
+  });
+
+  test("filler with deep.refs routes ALL files (core.files ∪ deep.refs) to refs[] with the slot", () => {
+    const filler = makeCard({
+      skill: "filler",
+      provides: ["x-cap"],
+      requires: [],
+      core: { files: ["refs/core1.md"] },
+      deep: {
+        subagents: [],
+        refs: ["refs/extra1.md"],
+        slots: {},
+        validators: [],
+      },
+    });
+    const consumer = makeCard({
+      skill: "consumer",
+      provides: ["consumer-cap"],
+      requires: ["x-cap"],
+    });
+    const comp = compose([filler, consumer], [], {
+      cards: ["filler", "consumer"],
+    });
+    const m = buildManifest(comp, [], [], REPO_ROOT);
+    expect(m.core.some((p) => p.includes("filler"))).toBe(false);
+    const fillerSlotRefs = m.refs.filter(
+      (r) => r.slot === "x-cap" && r.path.includes("filler")
+    );
+    const paths = fillerSlotRefs.map((r) => r.path).sort();
+    expect(paths.length).toBe(2);
+    expect(paths.some((p) => p.endsWith("filler/refs/core1.md"))).toBe(true);
+    expect(paths.some((p) => p.endsWith("filler/refs/extra1.md"))).toBe(true);
+  });
+
+  test("filler covering multiple slots emits one ref entry per (path, slot) pair", () => {
+    // Synthetic: one filler provides two distinct caps both required by
+    // the same matched set. Each file appears once per slot.
+    const filler = makeCard({
+      skill: "multi-filler",
+      provides: ["cap-a", "cap-b"],
+      core: { files: ["refs/shared.md"] },
+    });
+    const need = makeCard({
+      skill: "need",
+      provides: ["need-out"],
+      requires: ["cap-a", "cap-b"],
+    });
+    const comp = compose([filler, need], [], {
+      cards: ["multi-filler", "need"],
+    });
+    const m = buildManifest(comp, [], [], REPO_ROOT);
+    const sharedRefs = m.refs.filter((r) => r.path.includes("multi-filler"));
+    const slotsHit = sharedRefs.map((r) => r.slot).sort();
+    expect(slotsHit).toEqual(["cap-a", "cap-b"]);
+  });
+
+  test("non-filler card with empty deep.refs contributes nothing to refs[]", () => {
+    // Sanity: if the only matched card is a non-filler with no deep.refs,
+    // refs[] is empty.
+    const lone = makeCard({
+      skill: "lone",
+      core: { files: ["refs/x.md"] },
+    });
+    const comp = compose([lone], [], { cards: ["lone"] });
+    const m = buildManifest(comp, [], [], REPO_ROOT);
+    expect(m.refs).toEqual([]);
+    expect(m.core.length).toBe(1);
   });
 });
 

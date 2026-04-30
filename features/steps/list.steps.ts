@@ -64,3 +64,14 @@ Then<TaGenWorld>("it contains an array of skill objects", (world: TaGenWorld) =>
   const first = parsed[0] as { skill?: string };
   expect(typeof first.skill).toBe("string");
 });
+
+Then<TaGenWorld>(
+  "it prints provides, requires, and tier counts per card",
+  (world: TaGenWorld) => {
+    const out = world.result?.stdout ?? "";
+    expect(out).toContain("provides:");
+    expect(out).toContain("requires:");
+    expect(out).toMatch(/core:\s+\d+\s+file/);
+    expect(out).toMatch(/deep:/);
+  }
+);
