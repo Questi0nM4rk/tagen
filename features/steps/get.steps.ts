@@ -109,6 +109,10 @@ Then<TaGenWorld>("manifest.warnings is non-empty", (world: TaGenWorld) => {
   expect((manifest.warnings ?? []).length).toBeGreaterThan(0);
 });
 
+Then<TaGenWorld>("it prints warnings to stderr", (world: TaGenWorld) => {
+  expect((world.result?.stderr ?? "").length).toBeGreaterThan(0);
+});
+
 Then<TaGenWorld>(
   "it prints a compact summary line with card count and slot count",
   (world: TaGenWorld) => {

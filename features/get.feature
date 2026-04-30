@@ -13,6 +13,7 @@ Feature: tagen get — resolve composition into a JSON manifest
     Then it exits 0
     And stdout is valid JSON
     And manifest.warnings is non-empty
+    And it prints warnings to stderr
 
   Scenario: empty match set exits 2
     Given a skill-graph with catalog cards

@@ -2,11 +2,20 @@ import { join, relative } from "node:path";
 import { filterCards } from "./catalog";
 import type { CatalogCard, ProtocolEntry, Subagent } from "./types";
 
+/**
+ * Tag query for `tagen list` / `demo` / `get`. All array fields are repeatable;
+ * `language` is single-valued and matched inclusively (matches its value OR
+ * `agnostic`). `cards` is an override — when non-empty it bypasses every other
+ * filter and restricts the matched set to exactly those skill names.
+ */
 export interface ComposeQuery {
-  domain?: string;
+  phase?: string[];
+  domain?: string[];
   language?: string;
-  capability?: string;
-  skill?: string;
+  layer?: string[];
+  concerns?: string[];
+  capability?: string[];
+  protocol?: string[];
   cards?: string[];
 }
 
@@ -31,29 +40,47 @@ export interface Composition {
  *   find providers in the matched set. Pick the first provider by alphabetical
  *   card name. Warn when N>1 candidates exist; warn when no provider exists.
  */
+/**
+ * Filter cards by a ComposeQuery. Returns the matched set sorted by skill.
+ * `cards` override (when present) bypasses every other filter; otherwise
+ * tag dimensions AND together, capability/protocol filters intersect last.
+ * Shared by `compose()` and `tagen list`.
+ */
+export function filterByQuery(cards: CatalogCard[], q: ComposeQuery): CatalogCard[] {
+  let matched: CatalogCard[];
+  if (q.cards?.length) {
+    const wanted = new Set(q.cards);
+    matched = cards.filter((c) => wanted.has(c.skill));
+  } else {
+    const filters: Record<string, string[]> = {};
+    if (q.phase?.length) filters["phase"] = q.phase;
+    if (q.domain?.length) filters["domain"] = q.domain;
+    if (q.language) filters["language"] = [q.language];
+    if (q.layer?.length) filters["layer"] = q.layer;
+    if (q.concerns?.length) filters["concerns"] = q.concerns;
+    matched = filterCards(cards, filters);
+
+    if (q.capability?.length) {
+      const caps = new Set(q.capability);
+      matched = matched.filter((c) => c.provides.some((p) => caps.has(p)));
+    }
+    if (q.protocol?.length) {
+      const protos = new Set(q.protocol);
+      matched = matched.filter(
+        (c) =>
+          c.emits.some((p) => protos.has(p)) || c.consumes.some((p) => protos.has(p))
+      );
+    }
+  }
+  return [...matched].sort((a, b) => a.skill.localeCompare(b.skill));
+}
+
 export function compose(
   cards: CatalogCard[],
   subagents: Subagent[],
   q: ComposeQuery
 ): Composition {
-  let matched: CatalogCard[];
-  if (q.cards && q.cards.length > 0) {
-    matched = cards.filter((c) => q.cards!.includes(c.skill));
-  } else {
-    const filters: Record<string, string[]> = {};
-    if (q.domain) filters["domain"] = [q.domain];
-    if (q.language) filters["language"] = [q.language];
-    matched = filterCards(cards, filters);
-    if (q.skill) {
-      const skill = q.skill;
-      matched = matched.filter((c) => c.skill === skill);
-    }
-    if (q.capability) {
-      const cap = q.capability;
-      matched = matched.filter((c) => c.provides.includes(cap));
-    }
-  }
-  matched = [...matched].sort((a, b) => a.skill.localeCompare(b.skill));
+  const matched = filterByQuery(cards, q);
 
   const slots: ResolvedSlot[] = [];
   const warnings: string[] = [];
