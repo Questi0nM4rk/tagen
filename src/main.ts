@@ -1,7 +1,7 @@
 import { runAdd } from "./commands/add";
 import { runDemo } from "./commands/demo";
 import { runGet } from "./commands/get";
-import { runList } from "./commands/list";
+import { runList, runListSubagents } from "./commands/list";
 import { runTags } from "./commands/tags";
 import { runValidate } from "./commands/validate";
 import {
@@ -11,9 +11,9 @@ import {
 } from "./lib/capabilities";
 import { loadAllCards } from "./lib/catalog";
 import type { ComposeQuery } from "./lib/compose";
-import { loadProtocols } from "./lib/protocols";
+import { allProtocolNames, isValidProtocol, loadProtocols } from "./lib/protocols";
 import { loadSubagents } from "./lib/subagents";
-import type { CapabilityRegistry, Vocabulary } from "./lib/types";
+import type { CapabilityRegistry, ProtocolEntry, Vocabulary } from "./lib/types";
 import {
   findVaultDir,
   getValidValues,
@@ -28,50 +28,59 @@ Usage: tagen <command> [options]
 Commands:
   tags       Show controlled vocabulary
   validate   Check consistency of all catalog cards, protocols, and subagents
-  list       List all skills with their tags
+  list       List catalog cards (or subagents with --subagents)
   demo       Preview a composition (matched cards + slot fills + warnings)
   get        Resolve a composition into a JSON manifest (--json)
   add        Scaffold a new catalog card interactively
 
-Options:
-  --help        Show this help
-  --json        Output in JSON format (list, tags, get)
-  --filter      Filter list by dimension=value (e.g. --filter layer=orchestrator)
-  --domain      Composition tag filter (demo, get)
-  --language    Composition tag filter (demo, get)
-  --capability  Restrict matched set to providers of this capability (demo, get)
-  --skill       Restrict matched set to a single skill (demo, get)
-  --card NAME   Override slot resolution by listing exact cards (demo, get; repeatable)
+Options (list / demo / get):
+  --phase X        Filter by phase (repeatable, OR)
+  --domain X       Filter by domain (repeatable, OR)
+  --language X     Filter by language (single; matches X OR 'agnostic')
+  --layer X        Filter by layer (repeatable, OR)
+  --concerns X     Filter by concern (repeatable, OR)
+  --capability X   Cards whose 'provides' includes X (repeatable, OR)
+  --protocol X     Cards whose 'emits' or 'consumes' includes X (repeatable, OR)
+  --json           Machine-readable output
+
+list-only:
+  --subagents      List subagents instead of catalog cards
+
+demo / get:
+  --card NAME      Restrict matched set to listed cards (repeatable, bypasses
+                   tag filters; used to override slot resolution)
+
+demo:
+  --verbose        Print resolution trace
+
+get:
+  --dry-run        Skip downstream protocol-schema check (no-op today)
+
+validate:
+  --verbose        Print per-card per-rule trace
+
+Common:
+  --help           Show this help
 
 Examples:
   tagen list
-  tagen list --filter language=dotnet
+  tagen list --domain code-review --language dotnet
+  tagen list --subagents
   tagen tags --json
-  tagen demo --language dotnet
-  tagen get --language dotnet --json
-  tagen get --skill strict-review --language dotnet --json
-  tagen validate
+  tagen demo --domain code-review --language dotnet
+  tagen demo --card strict-review --card csharp-patterns
+  tagen get --domain code-review --language dotnet --json
+  tagen validate --verbose
 `;
 
-type FlagSetter = (q: ComposeQuery, value: string) => void;
-
-const COMPOSE_FLAGS: Record<string, FlagSetter> = {
-  "--domain": (q, v) => {
-    q.domain = v;
-  },
-  "--language": (q, v) => {
-    q.language = v;
-  },
-  "--capability": (q, v) => {
-    q.capability = v;
-  },
-  "--skill": (q, v) => {
-    q.skill = v;
-  },
-  "--card": (q, v) => {
-    q.cards = q.cards ?? [];
-    q.cards.push(v);
-  },
+const REPEAT_FLAGS: Record<string, (q: ComposeQuery) => string[]> = {
+  "--phase": (q) => (q.phase ??= []),
+  "--domain": (q) => (q.domain ??= []),
+  "--layer": (q) => (q.layer ??= []),
+  "--concerns": (q) => (q.concerns ??= []),
+  "--capability": (q) => (q.capability ??= []),
+  "--protocol": (q) => (q.protocol ??= []),
+  "--card": (q) => (q.cards ??= []),
 };
 
 function readFlagValue(args: string[], i: number, flag: string): string {
@@ -86,38 +95,65 @@ function readFlagValue(args: string[], i: number, flag: string): string {
 function parseComposeQuery(args: string[]): ComposeQuery {
   const q: ComposeQuery = {};
   for (let i = 0; i < args.length; i++) {
-    const setter = COMPOSE_FLAGS[args[i]];
-    if (setter) {
-      setter(q, readFlagValue(args, i, args[i]));
+    const flag = args[i];
+    if (flag === "--language") {
+      q.language = readFlagValue(args, i, flag);
+      i++;
+      continue;
+    }
+    const bucket = REPEAT_FLAGS[flag];
+    if (bucket) {
+      bucket(q).push(readFlagValue(args, i, flag));
       i++;
     }
   }
   return q;
 }
 
-/**
- * Validate ComposeQuery values against the controlled vocabulary and capability
- * enum. Per SPEC-tagen, an unknown value exits 1 — silently matching nothing
- * masks user typos.
- */
 function validateComposeQuery(
   q: ComposeQuery,
   vocab: Vocabulary,
-  capabilities: CapabilityRegistry
+  capabilities: CapabilityRegistry,
+  protocols: ProtocolEntry[]
 ): void {
   const errors: string[] = [];
-  const check = (dim: string, value: string | undefined, validList: string[]): void => {
-    if (value === undefined) return;
-    if (!validList.includes(value)) {
-      errors.push(`unknown ${dim} value: "${value}" (valid: ${validList.join(", ")})`);
+  const checkAll = (
+    dim: string,
+    values: string[] | undefined,
+    valid: string[]
+  ): void => {
+    if (!values?.length) return;
+    for (const v of values) {
+      if (!valid.includes(v)) {
+        errors.push(`unknown ${dim} value: "${v}" (valid: ${valid.join(", ")})`);
+      }
     }
   };
-  check("domain", q.domain, getValidValues(vocab, "domain"));
-  check("language", q.language, getValidValues(vocab, "language"));
-  if (q.capability && !isValidCapability(capabilities, q.capability)) {
+  checkAll("phase", q.phase, getValidValues(vocab, "phase"));
+  checkAll("domain", q.domain, getValidValues(vocab, "domain"));
+  checkAll("layer", q.layer, getValidValues(vocab, "layer"));
+  checkAll("concerns", q.concerns, getValidValues(vocab, "concerns"));
+  if (q.language && !getValidValues(vocab, "language").includes(q.language)) {
     errors.push(
-      `unknown capability: "${q.capability}" (valid: ${allCapabilities(capabilities).join(", ")})`
+      `unknown language value: "${q.language}" (valid: ${getValidValues(vocab, "language").join(", ")})`
     );
+  }
+  if (q.capability?.length) {
+    for (const cap of q.capability) {
+      if (!isValidCapability(capabilities, cap)) {
+        errors.push(
+          `unknown capability: "${cap}" (valid: ${allCapabilities(capabilities).join(", ")})`
+        );
+      }
+    }
+  }
+  if (q.protocol?.length) {
+    const validProtos = allProtocolNames(protocols);
+    for (const p of q.protocol) {
+      if (!isValidProtocol(protocols, p)) {
+        errors.push(`unknown protocol: "${p}" (valid: ${validProtos.join(", ")})`);
+      }
+    }
   }
   if (errors.length > 0) {
     for (const e of errors) process.stderr.write(`tagen: ${e}\n`);
@@ -144,6 +180,7 @@ async function main(): Promise<void> {
   }
 
   const json = args.includes("--json");
+  const verbose = args.includes("--verbose");
   const restArgs = args.slice(1);
   const vaultDir = findVaultDir();
 
@@ -154,10 +191,17 @@ async function main(): Promise<void> {
       break;
     }
     case "list": {
+      const vocab = loadVocabulary(vaultDir);
+      const capabilities = loadCapabilities(vaultDir);
+      const protocols = loadProtocols(vaultDir);
+      if (restArgs.includes("--subagents")) {
+        runListSubagents(loadSubagents(vaultDir), { json });
+        break;
+      }
       const cards = loadAllCards(vaultDir);
-      const filterIdx = restArgs.indexOf("--filter");
-      const filterArg = filterIdx >= 0 ? restArgs[filterIdx + 1] : undefined;
-      runList(cards, json, filterArg);
+      const q = parseComposeQuery(restArgs);
+      validateComposeQuery(q, vocab, capabilities, protocols);
+      runList(cards, q, { json });
       break;
     }
     case "validate": {
@@ -166,7 +210,15 @@ async function main(): Promise<void> {
       const capabilities = loadCapabilities(vaultDir);
       const protocols = loadProtocols(vaultDir);
       const subagents = loadSubagents(vaultDir);
-      runValidate(cards, vocab, capabilities, protocols, subagents, repoRoot(vaultDir));
+      runValidate(
+        cards,
+        vocab,
+        capabilities,
+        protocols,
+        subagents,
+        repoRoot(vaultDir),
+        { verbose }
+      );
       break;
     }
     case "add": {
@@ -180,9 +232,10 @@ async function main(): Promise<void> {
       const capabilities = loadCapabilities(vaultDir);
       const cards = loadAllCards(vaultDir);
       const subagents = loadSubagents(vaultDir);
+      const protocols = loadProtocols(vaultDir);
       const q = parseComposeQuery(restArgs);
-      validateComposeQuery(q, vocab, capabilities);
-      runDemo(cards, subagents, q);
+      validateComposeQuery(q, vocab, capabilities, protocols);
+      runDemo(cards, subagents, q, { verbose });
       break;
     }
     case "get": {
@@ -193,8 +246,9 @@ async function main(): Promise<void> {
       const protocols = loadProtocols(vaultDir);
       const root = repoRoot(vaultDir);
       const q = parseComposeQuery(restArgs);
-      validateComposeQuery(q, vocab, capabilities);
-      runGet(cards, subagents, protocols, root, q, json);
+      validateComposeQuery(q, vocab, capabilities, protocols);
+      const dryRun = restArgs.includes("--dry-run");
+      runGet(cards, subagents, protocols, root, q, { json, dryRun });
       break;
     }
   }

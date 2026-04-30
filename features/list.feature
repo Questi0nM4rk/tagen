@@ -5,10 +5,20 @@ Feature: tagen list — display skill catalog
     When I run "tagen list"
     Then it prints both fixture skill names
 
-  Scenario: list --filter by language
+  Scenario: list filters by --language (inclusive of agnostic)
     Given a skill-graph with catalog cards
-    When I run "tagen list --filter language=dotnet"
+    When I run "tagen list --language dotnet"
     Then it shows dotnet and agnostic skills
+
+  Scenario: list filters by --domain (repeatable)
+    Given a skill-graph with catalog cards
+    When I run "tagen list --domain code-review"
+    Then it prints both fixture skill names
+
+  Scenario: list --subagents lists subagents instead of cards
+    Given a skill-graph with catalog cards
+    When I run "tagen list --subagents"
+    Then it prints the domain-reviewer subagent
 
   Scenario: list --json outputs valid JSON array
     Given a skill-graph with catalog cards

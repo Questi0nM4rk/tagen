@@ -30,3 +30,9 @@ Feature: tagen demo — preview composition matches, slots, and warnings
     When I run "tagen demo --language cobol"
     Then it exits 1
     And it prints "unknown language value" to stderr
+
+  Scenario: --verbose prints resolution trace
+    Given a skill-graph with catalog cards
+    When I run "tagen demo --domain code-review --verbose"
+    Then it exits 0
+    And it prints a resolution trace

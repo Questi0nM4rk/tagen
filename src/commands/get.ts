@@ -1,11 +1,18 @@
 import { buildManifest, type ComposeQuery, compose } from "../lib/compose";
 import type { CatalogCard, ProtocolEntry, Subagent } from "../lib/types";
 
+export interface GetOptions {
+  json: boolean;
+  /** Reserved for the future protocol-schema check; no-op today. */
+  dryRun: boolean;
+}
+
 /**
- * Resolve a composition into a JSON manifest. Exit codes per SPEC-004:
- *   0 — manifest written (warnings OK)
+ * Resolve a composition into a JSON manifest. Exit codes per SPEC-tagen:
+ *   0 — manifest emitted (warnings OK)
  *   2 — empty match set
- * Exit 1 (validation error) is the caller's responsibility.
+ * Caller validates the ComposeQuery before invoking runGet. Per spec:
+ * stdout receives the JSON manifest; stderr receives any warnings.
  */
 export function runGet(
   cards: CatalogCard[],
@@ -13,7 +20,7 @@ export function runGet(
   protocols: ProtocolEntry[],
   repoRoot: string,
   q: ComposeQuery,
-  asJson: boolean
+  opts: GetOptions
 ): void {
   const comp = compose(cards, subagents, q);
 
@@ -24,12 +31,15 @@ export function runGet(
 
   const manifest = buildManifest(comp, subagents, protocols, repoRoot);
 
-  if (asJson) {
+  for (const w of manifest.warnings) {
+    process.stderr.write(`! ${w}\n`);
+  }
+
+  if (opts.json) {
     process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
     return;
   }
 
-  // Non-JSON fallback: pretty-print the manifest in a compact form.
   process.stdout.write(`Composition for query: ${JSON.stringify(q)}\n\n`);
   process.stdout.write(
     `${manifest.modules.length} card(s), ${manifest.slots.length} slot(s), ${manifest.warnings.length} warning(s).\n`

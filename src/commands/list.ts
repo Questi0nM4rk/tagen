@@ -1,17 +1,18 @@
-import { filterCards } from "../lib/catalog";
-import type { CatalogCard } from "../lib/types";
+import { type ComposeQuery, filterByQuery } from "../lib/compose";
+import type { CatalogCard, Subagent } from "../lib/types";
 
-export function runList(cards: CatalogCard[], json: boolean, filter?: string): void {
-  let filtered = cards;
+export interface ListOptions {
+  json: boolean;
+}
 
-  if (filter) {
-    const [dim, val] = filter.split("=");
-    if (dim && val) {
-      filtered = filterCards(cards, { [dim]: [val] });
-    }
-  }
+export function runList(
+  cards: CatalogCard[],
+  q: ComposeQuery,
+  opts: ListOptions
+): void {
+  const filtered = filterByQuery(cards, q);
 
-  if (json) {
+  if (opts.json) {
     process.stdout.write(`${JSON.stringify(filtered.map(cardSummary), null, 2)}\n`);
     return;
   }
@@ -35,6 +36,25 @@ export function runList(cards: CatalogCard[], json: boolean, filter?: string): v
   process.stdout.write(`\n${filtered.length} skill(s)\n`);
 }
 
+export function runListSubagents(subagents: Subagent[], opts: ListOptions): void {
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(subagents.map(subSummary), null, 2)}\n`);
+    return;
+  }
+  if (subagents.length === 0) {
+    process.stdout.write("No subagents found.\n");
+    return;
+  }
+  const header = `${"NAME".padEnd(28)} ${"MODEL".padEnd(8)} DESCRIPTION`;
+  process.stdout.write(`${header}\n${"─".repeat(header.length)}\n`);
+  for (const s of subagents) {
+    process.stdout.write(
+      `${s.name.padEnd(28)} ${s.model.padEnd(8)} ${s.description}\n`
+    );
+  }
+  process.stdout.write(`\n${subagents.length} subagent(s)\n`);
+}
+
 function cardSummary(c: CatalogCard) {
   return {
     skill: c.skill,
@@ -42,5 +62,16 @@ function cardSummary(c: CatalogCard) {
     tags: c.tags,
     provides: c.provides,
     requires: c.requires,
+  };
+}
+
+function subSummary(s: Subagent) {
+  return {
+    name: s.name,
+    model: s.model,
+    description: s.description,
+    consumes: s.consumes,
+    emits: s.emits,
+    references: s.references,
   };
 }
