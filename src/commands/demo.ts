@@ -1,17 +1,21 @@
 import { type ComposeQuery, compose } from "../lib/compose";
 import type { CatalogCard, Subagent } from "../lib/types";
 
+export interface DemoOptions {
+  verbose: boolean;
+}
+
 /**
- * Preview a composition. Exit codes per SPEC-004:
+ * Preview a composition. Exit codes per SPEC-tagen:
  *   0 — success (warnings OK)
  *   2 — empty match set
- * Exit 1 (validation error) is the caller's responsibility — it must validate
- * the ComposeQuery against vocabulary/capabilities before invoking runDemo.
+ * Caller validates the ComposeQuery before invoking runDemo.
  */
 export function runDemo(
   cards: CatalogCard[],
   subagents: Subagent[],
-  q: ComposeQuery
+  q: ComposeQuery,
+  opts: DemoOptions = { verbose: false }
 ): void {
   const comp = compose(cards, subagents, q);
 
@@ -33,6 +37,18 @@ export function runDemo(
     process.stdout.write(`  - ${s.capability} ← ${s.fillerCard}${extra}\n`);
   }
   process.stdout.write("\n");
+
+  if (opts.verbose) {
+    process.stdout.write("Resolution trace:\n");
+    for (const c of comp.cards) {
+      process.stdout.write(`  card '${c.skill}' provides: [${c.provides.join(", ")}]`);
+      process.stdout.write(` requires: [${c.requires.join(", ")}]\n`);
+      if (c.deep.subagents.length > 0) {
+        process.stdout.write(`    deep.subagents: ${c.deep.subagents.join(", ")}\n`);
+      }
+    }
+    process.stdout.write("\n");
+  }
 
   if (comp.warnings.length === 0) {
     process.stdout.write("No warnings.\n");

@@ -159,13 +159,18 @@ function dupErrors<T>(
   return errors;
 }
 
+export interface ValidateOptions {
+  verbose: boolean;
+}
+
 export function runValidate(
   cards: CatalogCard[],
   vocab: Vocabulary,
   capabilities: CapabilityRegistry,
   protocols: ProtocolEntry[],
   subagents: Subagent[],
-  root: string
+  root: string,
+  opts: ValidateOptions = { verbose: false }
 ): void {
   const ctx: CardCtx = {
     capabilities,
@@ -191,6 +196,18 @@ export function runValidate(
     ),
     ...subagents.flatMap((s) => checkSubagent(s, capabilities, protocols)),
   ];
+
+  if (opts.verbose) {
+    for (const c of cards) {
+      process.stdout.write(`[${c.skill}] checked\n`);
+    }
+    for (const s of subagents) {
+      process.stdout.write(`[subagent:${s.name}] checked\n`);
+    }
+    for (const p of protocols) {
+      process.stdout.write(`[protocol:${p.name}] checked\n`);
+    }
+  }
 
   if (errors.length === 0) {
     process.stdout.write(
