@@ -597,10 +597,12 @@ describe("runValidate", () => {
   });
 
   // ── 21. Happy path: all valid → exit 0, empty errors ──────────────────────
+  // Use the real `finding` fixture so the executability check on validator.ts
+  // hits an actual chmod +x file.
   test("21. happy path: all valid → exit 0, success message on stdout", () => {
     const card = minimalCard("romeo");
     const sub = minimalSubagent("sierra");
-    const proto = validProtocol("tango-proto");
+    const proto = validProtocol("finding");
     const result = runCapture(
       [card],
       minimalVocab(),
