@@ -56,14 +56,14 @@ beforeAll(() => {
 
 describe("compose — domain filter", () => {
   test("domain filter returns only cards with matching domain tag", () => {
-    const result = compose(allCards, allSubagents, { domain: "code-review" });
+    const result = compose(allCards, allSubagents, { domain: ["code-review"] });
     for (const c of result.cards) {
       expect(c.tags.domain).toContain("code-review");
     }
   });
 
   test("domain filter excludes cards from other domains", () => {
-    const result = compose(allCards, allSubagents, { domain: "testing" });
+    const result = compose(allCards, allSubagents, { domain: ["testing"] });
     const names = result.cards.map((c) => c.skill);
     expect(names).not.toContain("strict-review");
     expect(names).not.toContain("csharp-patterns");
@@ -73,7 +73,7 @@ describe("compose — domain filter", () => {
 describe("compose — language filter", () => {
   test("language filter excludes cards with a different language", () => {
     const result = compose(allCards, allSubagents, {
-      domain: "code-review",
+      domain: ["code-review"],
       language: "typescript",
     });
     for (const c of result.cards) {
@@ -84,7 +84,7 @@ describe("compose — language filter", () => {
 
   test("language=dotnet includes agnostic cards alongside dotnet cards", () => {
     const result = compose(allCards, allSubagents, {
-      domain: "code-review",
+      domain: ["code-review"],
       language: "dotnet",
     });
     const names = result.cards.map((c) => c.skill);
@@ -93,17 +93,17 @@ describe("compose — language filter", () => {
   });
 });
 
-describe("compose — skill filter", () => {
-  test("skill filter returns only the named card", () => {
+describe("compose — cards override", () => {
+  test("cards override returns only the named card", () => {
     const result = compose(allCards, allSubagents, {
-      skill: "strict-review",
+      cards: ["strict-review"],
     });
     expect(result.cards).toHaveLength(1);
     expect(result.cards[0]!.skill).toBe("strict-review");
   });
 
-  test("skill filter on unknown name returns empty cards", () => {
-    const result = compose(allCards, allSubagents, { skill: "no-such-skill" });
+  test("cards override on unknown name returns empty cards", () => {
+    const result = compose(allCards, allSubagents, { cards: ["no-such-skill"] });
     expect(result.cards).toHaveLength(0);
   });
 });
@@ -111,7 +111,7 @@ describe("compose — skill filter", () => {
 describe("compose — capability filter", () => {
   test("capability filter returns only cards that provide the capability", () => {
     const result = compose(allCards, allSubagents, {
-      capability: "language-patterns",
+      capability: ["language-patterns"],
     });
     for (const c of result.cards) {
       expect(c.provides).toContain("language-patterns");
@@ -120,7 +120,7 @@ describe("compose — capability filter", () => {
 
   test("capability filter excludes cards that do not provide it", () => {
     const result = compose(allCards, allSubagents, {
-      capability: "language-patterns",
+      capability: ["language-patterns"],
     });
     const names = result.cards.map((c) => c.skill);
     expect(names).not.toContain("strict-review"); // provides review-methodology, not language-patterns
@@ -139,7 +139,7 @@ describe("compose — --card override", () => {
   test("card override ignores domain/language filters", () => {
     const result = compose(allCards, allSubagents, {
       cards: ["csharp-patterns"],
-      domain: "testing", // would normally exclude code-review cards
+      domain: ["testing"], // would normally exclude code-review cards
     });
     const names = result.cards.map((c) => c.skill);
     expect(names).toContain("csharp-patterns");
@@ -153,7 +153,7 @@ describe("compose — --card override", () => {
 
 describe("compose — alphabetical sort", () => {
   test("matched cards are sorted alphabetically by skill name", () => {
-    const result = compose(allCards, allSubagents, { domain: "code-review" });
+    const result = compose(allCards, allSubagents, { domain: ["code-review"] });
     const names = result.cards.map((c) => c.skill);
     const sorted = [...names].sort();
     expect(names).toEqual(sorted);
@@ -162,18 +162,18 @@ describe("compose — alphabetical sort", () => {
 
 describe("compose — empty match", () => {
   test("returns zero cards when no card matches the query", () => {
-    const result = compose(allCards, allSubagents, { domain: "nonexistent" });
+    const result = compose(allCards, allSubagents, { domain: ["nonexistent"] });
     expect(result.cards).toHaveLength(0);
   });
 
   test("returns zero slots when match is empty", () => {
-    const result = compose(allCards, allSubagents, { domain: "nonexistent" });
+    const result = compose(allCards, allSubagents, { domain: ["nonexistent"] });
     expect(result.slots).toHaveLength(0);
   });
 
   test("emits no unfilled-slot warnings when no card requires anything", () => {
     // An empty match has no requires — no warnings expected.
-    const result = compose(allCards, allSubagents, { domain: "nonexistent" });
+    const result = compose(allCards, allSubagents, { domain: ["nonexistent"] });
     expect(result.warnings).toHaveLength(0);
   });
 });

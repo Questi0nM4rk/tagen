@@ -257,12 +257,28 @@ When<TaGenWorld>('I run "tagen demo --language cobol"', async (world: TaGenWorld
   world.result = await runTagen(["demo", "--language", "cobol"], world.projectDir);
 });
 
+When<TaGenWorld>(
+  'I run "tagen demo --domain code-review --verbose"',
+  async (world: TaGenWorld) => {
+    if (!world.projectDir) throw new Error("projectDir not set");
+    world.result = await runTagen(
+      ["demo", "--domain", "code-review", "--verbose"],
+      world.projectDir
+    );
+  }
+);
+
 // ─── Then ─────────────────────────────────────────────────────────────────────
 
 Then<TaGenWorld>("it prints matched card names", (world: TaGenWorld) => {
   const combined = (world.result?.stdout ?? "") + (world.result?.stderr ?? "");
   // runDemo prints "Matched N card(s):" and lists skill names
   expect(combined).toMatch(/Matched \d+ card/i);
+});
+
+Then<TaGenWorld>("it prints a resolution trace", (world: TaGenWorld) => {
+  const combined = (world.result?.stdout ?? "") + (world.result?.stderr ?? "");
+  expect(combined).toContain("Resolution trace");
 });
 
 Then<TaGenWorld>("it prints slot fills", (world: TaGenWorld) => {

@@ -24,7 +24,7 @@ beforeAll(() => {
   // strict-review and csharp-patterns). repoRoot=FIXTURES makes all
   // paths fixture-relative, which is deterministic across machines.
   const v2Cards = filterCards(cards, { domain: ["code-review"] });
-  const comp = compose(v2Cards, subagents, { domain: "code-review" });
+  const comp = compose(v2Cards, subagents, { domain: ["code-review"] });
   manifest = buildManifest(comp, subagents, protocols, FIXTURES);
 
   schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf8")) as Record<string, unknown>;
@@ -169,7 +169,7 @@ describe("manifest contract — negative", () => {
 
   test("slot with empty candidates array fails validation (minItems: 1)", () => {
     const badSlot = {
-      capability: "language-patterns",
+      capability: ["language-patterns"],
       fillerCard: "csharp-patterns",
       candidates: [],
     };
