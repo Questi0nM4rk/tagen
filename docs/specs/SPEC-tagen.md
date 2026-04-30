@@ -494,9 +494,9 @@ Field reference:
 | `emits` | `protocol[]` | no | Data shapes this card produces |
 | `consumes` | `protocol[]` | no | Data shapes this card ingests |
 | `surface.triggers` | `string[]` | no | Phrases that suggest this card |
-| `core.files` | `path[]` | no | Paths relative to `brain/<skill>/`; loaded on activation |
+| `core.files` | `path[]` | no | Paths relative to `brain/<skill>/`. Routing depends on the card's role in the composition (see Composition resolution algorithm step 9): non-filler card → `manifest.core[]`; chosen filler card → `manifest.refs[]` tagged with the slot capability. |
 | `deep.subagents` | `string[]` | no | Subagent names; tagen resolves each from `skill-graph/subagents/` |
-| `deep.refs` | `path[]` | no | Card-owned refs (paths relative to `brain/<skill>/`) |
+| `deep.refs` | `path[]` | no | Additional card-owned refs (paths relative to `brain/<skill>/`). Routing follows the same role-based rules as `core.files`: non-filler card → added to `manifest.refs[]` with `slot: null`; chosen filler card → added to `manifest.refs[]` tagged with the slot capability. |
 | `deep.slots` | `Record<capability, true>` | no | Slots filled by any matched card providing that capability |
 | `deep.validators` | `path[]` | no | Card-level validator scripts |
 
@@ -558,9 +558,56 @@ Used by `tagen demo` and `tagen get`. Read-only.
        if missing: warning "unknown subagent: <name> referenced by <card>"
      deduplicate (same subagent referenced by multiple cards = one entry)
      subagent.references[] are handled in step 7
-9. Assemble manifest (see JSON contract below)
-10. Output JSON to stdout; exit 0 on success, 1 on validation error, 2 on no match
+9. Route content by role — every matched card's content lands in exactly one place:
+     For each matched card C:
+       fillerSlots = capabilities X for which C is the chosen filler (i.e., X
+                     appears in slots[] with fillerCard = C.skill)
+       If fillerSlots is empty (C is not filling any slot):
+         For each f in C.core.files:           append f to manifest.core[]
+         For each f in C.deep.refs:            append { path: f, slot: null } to manifest.refs[]
+       Else (C is the chosen filler for one or more slots):
+         For each f in C.core.files ∪ C.deep.refs:
+           For each cap in fillerSlots:
+             append { path: f, slot: cap } to manifest.refs[]
+         (C.core.files do NOT appear in manifest.core[] in this case.)
+10. Assemble manifest (see JSON contract below)
+11. Output JSON to stdout; exit 0 on success, 1 on validation error, 2 on no match
 ```
+
+### Why content routing splits this way
+
+The manifest must make it **immediately obvious** to a reader (human or agent) which
+files were loaded as the methodology's own context vs which were pulled in to fill a
+named capability slot. That distinction drives prompt budgeting, slot debugging, and
+the `--card` override workflow.
+
+Routing truth table — what determines where each card's content lands:
+
+| Card matched? | Card fills a slot? | `core.files` routed to | `deep.refs` routed to |
+|---------------|--------------------|------------------------|----------------------|
+| no            | n/a                | (not loaded)           | (not loaded) |
+| yes           | no                 | `manifest.core[]`      | `manifest.refs[]` with `slot: null` |
+| yes           | yes (one slot)     | `manifest.refs[]` with `slot: <cap>` | `manifest.refs[]` with `slot: <cap>` |
+| yes           | yes (multiple)     | `manifest.refs[]` once per slot, each tagged with that `<cap>` | `manifest.refs[]` once per slot, each tagged with that `<cap>` |
+
+Rule of thumb (reading the manifest):
+
+| Where a path appears | What it means |
+|----------------------|---------------|
+| `manifest.core[]` | Loaded because a methodology (or other non-filler matched card) is in scope. No slot relationship. |
+| `manifest.refs[]` with `slot: <cap>` | Loaded because the card filled the `<cap>` slot for someone else in the matched set. |
+| `manifest.refs[]` with `slot: null` | Card-owned `deep.refs` from a non-filler card (loaded for sub-agent dispatch context). |
+
+A card that is BOTH matched independently AND chosen as a filler is treated as a filler — its
+content goes to `refs[]` tagged with the slot, never to `core[]`. The card still appears in
+`modules[]` and the slots[] entry names it as `fillerCard`; its dual nature is recoverable
+without duplicating its files across both buckets.
+
+If a card fills multiple slots simultaneously (rare; would mean it `provides` multiple
+capabilities that are all required in the same composition), each of its files appears
+once per slot in `refs[]` — duplicate paths with different `slot:` tags. Agents can
+deduplicate by path if they only care about which file to read; the per-slot grouping
+is preserved for those who need it.
 
 `--card NAME` (repeatable) is the agent's escape hatch when the alphabetical default would pick the wrong
 card. It restricts the matched set to exactly the listed cards, bypassing tag-query filtering.
@@ -570,6 +617,10 @@ card. It restricts the matched set to exactly the listed cards, bypassing tag-qu
 ## Commands
 
 Six commands. All read-only except `add`.
+
+The CLI also recognises `--version` (alias `-V`) before any subcommand. It prints the bundled
+`package.json` version to stdout and exits 0 without touching the skill-graph. This is the
+first-line answer to "what version" in any bug report or CI log.
 
 ### `tagen tags`
 
@@ -703,12 +754,11 @@ Breaking changes require a dedicated PR with consumers updated in lockstep.
 
 ```json
 {
-  "modules": ["strict-review", "csharp-patterns"],
+  "modules": ["csharp-patterns", "strict-review"],
   "core": [
     "brain/strict-review/refs/workflow.md",
     "brain/strict-review/refs/iron-laws.md",
-    "brain/strict-review/refs/output-format.md",
-    "brain/csharp-patterns/refs/dotnet-iron-laws.md"
+    "brain/strict-review/refs/output-format.md"
   ],
   "subagents": [
     {
@@ -737,8 +787,7 @@ Breaking changes require a dedicated PR with consumers updated in lockstep.
     }
   ],
   "refs": [
-    { "path": "brain/csharp-patterns/refs/csharp-patterns.md", "slot": "language-patterns" },
-    { "path": "brain/csharp-patterns/refs/efcore-patterns.md", "slot": "language-patterns" }
+    { "path": "brain/csharp-patterns/refs/csharp-patterns.md", "slot": "language-patterns" }
   ],
   "slots": [
     {
@@ -767,9 +816,13 @@ Breaking changes require a dedicated PR with consumers updated in lockstep.
 ```
 
 JSON Schema lives at `docs/tagen-get-manifest.schema.json` and is enforced by a dedicated CI test on every PR.
+The schema is the **authoritative shape** of the manifest; the TypeScript interfaces below are a non-binding view of it.
+When schema and types drift, the schema wins and the types must be brought into line.
 
 Agent reads:
-- `core[]` files into context immediately.
+- `core[]` files into context immediately — the methodology's own context, no slot relationship.
+- `refs[]` files into context immediately, grouped by `slot:` — the content that filled each
+  named capability slot for the matched composition. `slot: null` entries are card-owned `deep.refs`.
 - `subagents[]` for dispatch (name → prompt path, model from `model`).
 - Pipe each subagent's output through `validators.protocol[]` for the matching `emits[0]`, then any
   `validators.card[]` from the same module. All exit 0 → pass.
@@ -849,6 +902,7 @@ export interface ResolvedSubagent {
   name: string;
   model: SubagentModel;
   prompt: string;                          // repo-relative path
+  description: string;                     // mirrors the subagent's frontmatter description
   consumes: string[];
   emits: string[];
   references: string[];
