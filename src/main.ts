@@ -187,7 +187,10 @@ async function main(): Promise<void> {
   switch (command) {
     case "tags": {
       const vocab = loadVocabulary(vaultDir);
-      runTags(vocab, json);
+      const capabilities = loadCapabilities(vaultDir);
+      const protocols = loadProtocols(vaultDir);
+      const subagents = loadSubagents(vaultDir);
+      runTags(vocab, capabilities, protocols, subagents, json);
       break;
     }
     case "list": {

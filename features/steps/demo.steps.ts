@@ -272,8 +272,8 @@ When<TaGenWorld>(
 
 Then<TaGenWorld>("it prints matched card names", (world: TaGenWorld) => {
   const combined = (world.result?.stdout ?? "") + (world.result?.stderr ?? "");
-  // runDemo prints "Matched N card(s):" and lists skill names
-  expect(combined).toMatch(/Matched \d+ card/i);
+  // runDemo prints "Modules: <names>"
+  expect(combined).toMatch(/^\s*Modules:/m);
 });
 
 Then<TaGenWorld>("it prints a resolution trace", (world: TaGenWorld) => {
@@ -283,8 +283,8 @@ Then<TaGenWorld>("it prints a resolution trace", (world: TaGenWorld) => {
 
 Then<TaGenWorld>("it prints slot fills", (world: TaGenWorld) => {
   const combined = (world.result?.stdout ?? "") + (world.result?.stderr ?? "");
-  // runDemo prints "Slot fills (N):"
-  expect(combined).toMatch(/Slot fills/i);
+  // runDemo prints "Slots (N):"
+  expect(combined).toMatch(/Slots \(\d+\):/);
 });
 
 Then<TaGenWorld>(
