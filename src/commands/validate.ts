@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { allCapabilities, isValidCapability } from "../lib/capabilities";
 import { isValidProtocol } from "../lib/protocols";
 import { filenameStem } from "../lib/subagents";
@@ -75,13 +75,38 @@ function checkCard(card: CatalogCard, ctx: CardCtx): string[] {
   }
 
   const brainRoot = resolve(ctx.root, "brain", card.skill);
-  for (const p of [...card.core.files, ...card.deep.refs, ...card.deep.validators]) {
+  for (const p of [...card.core.files, ...card.deep.refs]) {
     if (!existsSync(resolve(brainRoot, p))) {
       errors.push(`${prefix} path not found: brain/${card.skill}/${p}`);
     }
   }
+  for (const p of card.deep.validators) {
+    const full = resolve(brainRoot, p);
+    if (!existsSync(full)) {
+      errors.push(`${prefix} path not found: brain/${card.skill}/${p}`);
+      continue;
+    }
+    if (!isExecutable(full)) {
+      errors.push(`${prefix} card validator not executable: brain/${card.skill}/${p}`);
+    }
+  }
 
   return errors;
+}
+
+/**
+ * Check whether a file has an executable mode bit set for owner/group/other.
+ * Validators run as `bun <script>` (stdin → exit-code), so the strict criterion
+ * is "any +x bit". A directory or special file fails.
+ */
+function isExecutable(path: string): boolean {
+  try {
+    const st = statSync(path);
+    if (!st.isFile()) return false;
+    return (st.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
 }
 
 function checkProtocol(p: ProtocolEntry): string[] {
@@ -89,7 +114,14 @@ function checkProtocol(p: ProtocolEntry): string[] {
   const prefix = `[protocol:${p.name}]`;
   if (!p.hasSchema) errors.push(`${prefix} missing schema.json`);
   if (!p.hasDoc) errors.push(`${prefix} missing protocol.md`);
-  if (!p.hasValidator) errors.push(`${prefix} missing validator.ts`);
+  if (!p.hasValidator) {
+    errors.push(`${prefix} missing validator.ts`);
+  } else {
+    const validatorPath = join(p.dirPath, "validator.ts");
+    if (!isExecutable(validatorPath)) {
+      errors.push(`${prefix} validator.ts not executable`);
+    }
+  }
   if (!p.hasValidExamples) {
     errors.push(`${prefix} missing examples/valid/*.json (need at least one)`);
   }
