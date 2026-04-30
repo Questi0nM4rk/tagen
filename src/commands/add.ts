@@ -1,17 +1,27 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
+import type { Readable, Writable } from "node:stream";
 import type { CatalogCard, Vocabulary } from "../lib/types";
 import { getValidValues } from "../lib/vocabulary";
 
 type RL = ReturnType<typeof createInterface>;
 
+export interface AddStreams {
+  input?: Readable;
+  output?: Writable;
+}
+
 export async function runAdd(
   cards: CatalogCard[],
   vocab: Vocabulary,
-  vaultDir: string
+  vaultDir: string,
+  streams: AddStreams = {}
 ): Promise<void> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = createInterface({
+    input: streams.input ?? process.stdin,
+    output: streams.output ?? process.stdout,
+  });
   try {
     const name = await ask(rl, "Skill name: ");
     if (!name) return abort("No name provided.");
@@ -43,7 +53,7 @@ export async function runAdd(
   }
 }
 
-interface ScaffoldArgs {
+export interface ScaffoldArgs {
   name: string;
   description: string;
   phase: string[];
@@ -53,7 +63,7 @@ interface ScaffoldArgs {
   concerns: string[];
 }
 
-function scaffoldCard(a: ScaffoldArgs): string {
+export function scaffoldCard(a: ScaffoldArgs): string {
   return `---
 skill: ${a.name}
 description: "${a.description.replace(/"/g, '\\"')}"
