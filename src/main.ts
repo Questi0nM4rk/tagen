@@ -1,167 +1,114 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { runAdd } from "./commands/add";
-import { runGet } from "./commands/get";
-import { runList, runListSubagents } from "./commands/list";
-import { runValidate } from "./commands/validate";
-import {
-  allCapabilities,
-  isValidCapability,
-  loadCapabilities,
-} from "./lib/capabilities";
-import { loadAllCards } from "./lib/catalog";
-import type { ComposeQuery } from "./lib/compose";
-import { allProtocolNames, isValidProtocol, loadProtocols } from "./lib/protocols";
-import { loadSubagents } from "./lib/subagents";
-import type { CapabilityRegistry, ProtocolEntry, Vocabulary } from "./lib/types";
-import {
-  findVaultDir,
-  getValidValues,
-  loadVocabulary,
-  repoRoot,
-} from "./lib/vocabulary";
+import { runAdd } from "./commands/add.ts";
+import { runGet } from "./commands/get.ts";
+import { runList } from "./commands/list.ts";
+import { runValidate } from "./commands/validate.ts";
+import { findBrainDir, loadAllCards, marketplaceRoot } from "./lib/catalog.ts";
+import { type ComposeQuery, emptyQuery, knownTypesFromCards } from "./lib/compose.ts";
+import { type CardId, type CardType, cardKey } from "./lib/types.ts";
 
-const USAGE = `tagen — skill graph CLI for qsm-marketplace
+const USAGE = `tagen — read-only CLI for a brain/ directory of typed cards
 
 Usage: tagen <command> [options]
 
 Commands:
-  validate   Check consistency of all catalog cards, protocols, and subagents
-  list       List catalog cards (or subagents with --subagents)
+  list       List catalog cards as <type>/<name>
+  validate   Walk the tree and report every rule violation; exit non-zero on any
   get        Resolve a composition into a JSON manifest (--json)
-  add        Scaffold a new catalog card interactively
+  add        Scaffold a new card interactively (the only command that writes)
 
-Options (list / get):
-  --phase X        Filter by phase (repeatable, OR)
-  --domain X       Filter by domain (repeatable, OR)
-  --language X     Filter by language (single; matches X OR 'agnostic')
-  --layer X        Filter by layer (repeatable, OR)
-  --concerns X     Filter by concern (repeatable, OR)
-  --capability X   Cards whose 'provides' includes X (repeatable, OR)
-  --protocol X     Cards whose 'emits' or 'consumes' includes X (repeatable, OR)
+list:
+  --type T         Restrict to one type
+  --aliases        Include each card's aliases
   --json           Machine-readable output
 
-list-only:
-  --subagents      List subagents instead of catalog cards
-
 get:
-  --card NAME      Restrict matched set to listed cards (repeatable, bypasses
-                   tag filters; used to override slot resolution)
+  <args>...        Positional, fuzzy-matched against canonical names + aliases
+                   (min 3 chars). A bare type-name (e.g. 'methodology') triggers
+                   browse intent — equivalent to 'list --type T'.
+  --type T --name N      Explicit (type, name) selection (paired, repeatable)
+  --pin <type>=<name>    Force a card to fill a slot (repeatable)
+  --json                 Machine-readable manifest (default)
 
 validate:
-  --verbose        Print per-card per-rule trace
+  --verbose         Per-card per-rule trace
 
 Common:
-  --help           Show this help
-
-Examples:
-  tagen list
-  tagen list --domain code-review --language dotnet
-  tagen list --subagents
-  tagen get --domain code-review --language dotnet --json
-  tagen validate --verbose
+  --help / -h       Show this help
+  --version / -V    Print version
 `;
-
-const REPEAT_FLAGS: Record<string, (q: ComposeQuery) => string[]> = {
-  "--phase": (q) => (q.phase ??= []),
-  "--domain": (q) => (q.domain ??= []),
-  "--layer": (q) => (q.layer ??= []),
-  "--concerns": (q) => (q.concerns ??= []),
-  "--capability": (q) => (q.capability ??= []),
-  "--protocol": (q) => (q.protocol ??= []),
-  "--card": (q) => (q.cards ??= []),
-};
-
-function readFlagValue(args: string[], i: number, flag: string): string {
-  const v = args[i + 1];
-  if (v === undefined) {
-    process.stderr.write(`tagen: ${flag} requires a value\n`);
-    process.exit(1);
-  }
-  return v;
-}
-
-function parseComposeQuery(args: string[]): ComposeQuery {
-  const q: ComposeQuery = {};
-  for (let i = 0; i < args.length; i++) {
-    const flag = args[i];
-    if (flag === "--language") {
-      q.language = readFlagValue(args, i, flag);
-      i++;
-      continue;
-    }
-    const bucket = REPEAT_FLAGS[flag];
-    if (bucket) {
-      bucket(q).push(readFlagValue(args, i, flag));
-      i++;
-    }
-  }
-  return q;
-}
-
-function validateComposeQuery(
-  q: ComposeQuery,
-  vocab: Vocabulary,
-  capabilities: CapabilityRegistry,
-  protocols: ProtocolEntry[]
-): void {
-  const errors: string[] = [];
-  const checkAll = (
-    dim: string,
-    values: string[] | undefined,
-    valid: string[]
-  ): void => {
-    if (!values?.length) return;
-    for (const v of values) {
-      if (!valid.includes(v)) {
-        errors.push(`unknown ${dim} value: "${v}" (valid: ${valid.join(", ")})`);
-      }
-    }
-  };
-  checkAll("phase", q.phase, getValidValues(vocab, "phase"));
-  checkAll("domain", q.domain, getValidValues(vocab, "domain"));
-  checkAll("layer", q.layer, getValidValues(vocab, "layer"));
-  checkAll("concerns", q.concerns, getValidValues(vocab, "concerns"));
-  if (q.language && !getValidValues(vocab, "language").includes(q.language)) {
-    errors.push(
-      `unknown language value: "${q.language}" (valid: ${getValidValues(vocab, "language").join(", ")})`
-    );
-  }
-  if (q.capability?.length) {
-    for (const cap of q.capability) {
-      if (!isValidCapability(capabilities, cap)) {
-        errors.push(
-          `unknown capability: "${cap}" (valid: ${allCapabilities(capabilities).join(", ")})`
-        );
-      }
-    }
-  }
-  if (q.protocol?.length) {
-    const validProtos = allProtocolNames(protocols);
-    for (const p of q.protocol) {
-      if (!isValidProtocol(protocols, p)) {
-        errors.push(`unknown protocol: "${p}" (valid: ${validProtos.join(", ")})`);
-      }
-    }
-  }
-  if (errors.length > 0) {
-    for (const e of errors) process.stderr.write(`tagen: ${e}\n`);
-    process.exit(1);
-  }
-}
 
 const KNOWN_COMMANDS = new Set(["validate", "list", "get", "add"]);
 
-/**
- * Read the bundled package.json's version field. Resolves relative to this
- * compiled file so it works for both `bun run src/main.ts` and the bundled
- * `bin/tagen.js` distribution.
- */
 function readBundledVersion(): string {
   const pkgPath = join(import.meta.dir, "..", "package.json");
   const raw = readFileSync(pkgPath, "utf8");
   const pkg = JSON.parse(raw) as { version?: string };
   return pkg.version ?? "unknown";
+}
+
+interface ParsedArgs {
+  positional: string[];
+  flags: Map<string, string[]>;
+  bools: Set<string>;
+}
+
+const REPEAT_PAIR_FLAGS = new Set(["--type", "--name", "--pin"]);
+const BOOLEAN_FLAGS = new Set(["--json", "--verbose", "--aliases"]);
+
+function parseArgs(args: string[]): ParsedArgs {
+  const positional: string[] = [];
+  const flags = new Map<string, string[]>();
+  const bools = new Set<string>();
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === undefined) continue;
+    if (BOOLEAN_FLAGS.has(arg)) {
+      bools.add(arg);
+      continue;
+    }
+    if (REPEAT_PAIR_FLAGS.has(arg)) {
+      const v = args[i + 1];
+      if (v === undefined) {
+        process.stderr.write(`tagen: ${arg} requires a value\n`);
+        process.exit(1);
+      }
+      const list = flags.get(arg) ?? [];
+      list.push(v);
+      flags.set(arg, list);
+      i++;
+      continue;
+    }
+    positional.push(arg);
+  }
+  return { positional, flags, bools };
+}
+
+function buildComposeQuery(parsed: ParsedArgs): ComposeQuery {
+  const q = emptyQuery();
+  q.positional = parsed.positional;
+
+  const types = parsed.flags.get("--type") ?? [];
+  const names = parsed.flags.get("--name") ?? [];
+  if (types.length !== names.length) {
+    process.stderr.write("tagen: --type and --name must be paired\n");
+    process.exit(1);
+  }
+  for (let i = 0; i < types.length; i++) {
+    const id: CardId = { type: types[i] as CardType, name: names[i] as string };
+    q.explicit.push(id);
+  }
+
+  for (const pin of parsed.flags.get("--pin") ?? []) {
+    const eq = pin.indexOf("=");
+    if (eq <= 0 || eq === pin.length - 1) {
+      process.stderr.write(`tagen: invalid --pin '${pin}', expected <type>=<name>\n`);
+      process.exit(1);
+    }
+    q.pins.set(pin.slice(0, eq), pin.slice(eq + 1));
+  }
+  return q;
 }
 
 async function main(): Promise<void> {
@@ -172,12 +119,10 @@ async function main(): Promise<void> {
     process.stdout.write(USAGE);
     return;
   }
-
   if (command === "--version" || command === "-V") {
     process.stdout.write(`${readBundledVersion()}\n`);
     return;
   }
-
   if (!KNOWN_COMMANDS.has(command)) {
     process.stderr.write(
       `Unknown command: ${command}\nRun 'tagen --help' for usage.\n`
@@ -185,60 +130,40 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const json = args.includes("--json");
-  const verbose = args.includes("--verbose");
   const restArgs = args.slice(1);
-  const vaultDir = findVaultDir();
+  const parsed = parseArgs(restArgs);
+  const json = parsed.bools.has("--json");
+  const verbose = parsed.bools.has("--verbose");
+  const aliases = parsed.bools.has("--aliases");
+
+  const brainDir = findBrainDir();
+  const root = marketplaceRoot(brainDir);
+  const { cards, protocols, frontmatterErrors } = loadAllCards(brainDir);
 
   switch (command) {
     case "list": {
-      const vocab = loadVocabulary(vaultDir);
-      const capabilities = loadCapabilities(vaultDir);
-      const protocols = loadProtocols(vaultDir);
-      if (restArgs.includes("--subagents")) {
-        runListSubagents(loadSubagents(vaultDir), { json });
-        break;
-      }
-      const cards = loadAllCards(vaultDir);
-      const q = parseComposeQuery(restArgs);
-      validateComposeQuery(q, vocab, capabilities, protocols);
-      runList(cards, q, { json });
-      break;
+      const typeFilter = parsed.flags.get("--type")?.[0];
+      runList(cards, { json, type: typeFilter, aliases });
+      return;
     }
     case "validate": {
-      const vocab = loadVocabulary(vaultDir);
-      const cards = loadAllCards(vaultDir);
-      const capabilities = loadCapabilities(vaultDir);
-      const protocols = loadProtocols(vaultDir);
-      const subagents = loadSubagents(vaultDir);
+      const knownTypes = knownTypesFromCards(cards);
+      const index = new Map(cards.map((c) => [cardKey(c.id), c] as const));
       runValidate(
-        cards,
-        vocab,
-        capabilities,
-        protocols,
-        subagents,
-        repoRoot(vaultDir),
+        { cards, protocols, root, frontmatterErrors, knownTypes, index },
         { verbose }
       );
-      break;
-    }
-    case "add": {
-      const vocab = loadVocabulary(vaultDir);
-      const cards = loadAllCards(vaultDir);
-      await runAdd(cards, vocab, vaultDir);
-      break;
+      return;
     }
     case "get": {
-      const vocab = loadVocabulary(vaultDir);
-      const capabilities = loadCapabilities(vaultDir);
-      const cards = loadAllCards(vaultDir);
-      const subagents = loadSubagents(vaultDir);
-      const protocols = loadProtocols(vaultDir);
-      const root = repoRoot(vaultDir);
-      const q = parseComposeQuery(restArgs);
-      validateComposeQuery(q, vocab, capabilities, protocols);
-      runGet(cards, subagents, protocols, root, q, { json });
-      break;
+      const query = buildComposeQuery(parsed);
+      runGet(cards, root, query, { json });
+      return;
+    }
+    case "add": {
+      const knownTypes = knownTypesFromCards(cards);
+      await runAdd(cards, knownTypes, brainDir);
+      return;
     }
   }
 }

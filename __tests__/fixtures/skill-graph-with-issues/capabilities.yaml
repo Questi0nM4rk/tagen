@@ -1,7 +1,0 @@
-capabilities:
-  review-methodology: "Process for reviewing PRs / MRs"
-  language-patterns: "Language-specific patterns"
-  test-patterns: "Test-authoring patterns"
-  api-patterns: "API design patterns"
-  data-patterns: "Data-access patterns"
-  framework-patterns:

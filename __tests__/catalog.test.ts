@@ -1,123 +1,103 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { filterCards, loadAllCards, sortCards } from "../src/lib/catalog.ts";
-import type { CatalogCard, Vocabulary } from "../src/lib/types.ts";
-import { loadVocabulary } from "../src/lib/vocabulary.ts";
+import { findBrainDir, loadAllCards, marketplaceRoot } from "../src/lib/catalog.ts";
 
-const FIXTURES = join(import.meta.dir, "fixtures/skill-graph");
+const FIXTURES = join(import.meta.dir, "fixtures");
+const BRAIN = join(FIXTURES, "brain");
 
-let allCards: CatalogCard[];
-let vocab: Vocabulary;
+describe("findBrainDir", () => {
+  test("finds brain/ in the given dir", () => {
+    expect(findBrainDir(FIXTURES)).toBe(BRAIN);
+  });
 
-beforeAll(() => {
-  allCards = loadAllCards(FIXTURES);
-  vocab = loadVocabulary(FIXTURES);
+  test("walks up to find brain/", () => {
+    expect(findBrainDir(join(BRAIN, "lang", "csharp"))).toBe(BRAIN);
+  });
+
+  test("throws when no brain/ above", () => {
+    const empty = mkdtempSync(join(tmpdir(), "tagen-no-brain-"));
+    try {
+      expect(() => findBrainDir(empty)).toThrow(/no brain\/ directory found/);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
 });
 
-// ─── loadAllCards ─────────────────────────────────────────────────────────────
+describe("marketplaceRoot", () => {
+  test("returns the parent of brain/", () => {
+    expect(marketplaceRoot(BRAIN)).toBe(FIXTURES);
+  });
+});
 
 describe("loadAllCards", () => {
-  test("loads all fixture cards", () => {
-    expect(allCards.length).toBeGreaterThan(0);
+  const result = loadAllCards(BRAIN);
+
+  test("walks every type dir", () => {
+    const types = new Set(result.cards.map((c) => c.id.type));
+    expect(types).toEqual(
+      new Set([
+        "architecture",
+        "framework",
+        "lang",
+        "methodology",
+        "protocol",
+        "review",
+        "subagent",
+        "test",
+      ])
+    );
   });
 
-  test("parses skill names correctly", () => {
-    const skills = allCards.map((c) => c.skill).sort();
-    expect(skills).toEqual(["csharp-patterns", "strict-review"]);
+  test("loads csharp with dotnet alias", () => {
+    const csharp = result.cards.find(
+      (c) => c.id.type === "lang" && c.id.name === "csharp"
+    );
+    expect(csharp?.frontmatter.aliases).toEqual(["dotnet"]);
   });
 
-  test("parses description from YAML frontmatter", () => {
-    const sr = allCards.find((c) => c.skill === "strict-review");
-    expect(sr?.description).toContain("Zero-tolerance PR/MR review");
+  test("review/strict has subagents + validators + references", () => {
+    const strict = result.cards.find(
+      (c) => c.id.type === "review" && c.id.name === "strict"
+    );
+    expect(strict?.frontmatter.subagents).toEqual([
+      "security-reviewer",
+      "style-reviewer",
+    ]);
+    expect(strict?.frontmatter.requires).toEqual(["lang"]);
+    expect(strict?.references).toEqual(["brain/review/strict/references/workflow.md"]);
+    expect(strict?.validators).toEqual(["brain/review/strict/validators/no-emoji.ts"]);
   });
 
-  test("parses provides as array", () => {
-    const sr = allCards.find((c) => c.skill === "strict-review");
-    expect(sr?.provides).toEqual(["review-methodology"]);
+  test("subagents carry model frontmatter", () => {
+    const sec = result.cards.find(
+      (c) => c.id.type === "subagent" && c.id.name === "security-reviewer"
+    );
+    expect(sec?.frontmatter.model).toBe("sonnet");
   });
 
-  test("parses requires as array", () => {
-    const sr = allCards.find((c) => c.skill === "strict-review");
-    expect(sr?.requires).toEqual(["language-patterns"]);
+  test("protocol cards include schema/validator/examples paths", () => {
+    expect(result.protocols).toHaveLength(1);
+    const finding = result.protocols[0];
+    expect(finding?.id.name).toBe("finding");
+    expect(finding?.schemaPath).toBe("brain/protocol/finding/schema.json");
+    expect(finding?.validatorPath).toBe("brain/protocol/finding/validator.ts");
+    expect(finding?.validExamples).toEqual([
+      "brain/protocol/finding/examples/valid/sample.json",
+    ]);
+    expect(finding?.invalidExamples).toEqual([
+      "brain/protocol/finding/examples/invalid/missing-message.json",
+    ]);
   });
 
-  test("parses deep.slots into object", () => {
-    const sr = allCards.find((c) => c.skill === "strict-review");
-    expect(sr?.deep.slots).toEqual({ "language-patterns": true });
+  test("frontmatter parse errors collected, not thrown", () => {
+    expect(result.frontmatterErrors.size).toBe(0);
   });
 
-  test("returns empty array for non-existent vault dir", () => {
-    const result = loadAllCards("/nonexistent/path");
-    expect(result).toEqual([]);
-  });
-});
-
-// ─── filterCards ─────────────────────────────────────────────────────────────
-
-describe("filterCards", () => {
-  test("language=dotnet matches csharp-patterns AND strict-review (agnostic)", () => {
-    const result = filterCards(allCards, { language: ["dotnet"] });
-    const skills = result.map((c) => c.skill).sort();
-    expect(skills).toEqual(["csharp-patterns", "strict-review"]);
-  });
-
-  test("language=python excludes dotnet-only cards but keeps agnostic", () => {
-    const result = filterCards(allCards, { language: ["python"] });
-    const skills = result.map((c) => c.skill);
-    expect(skills).toContain("strict-review"); // agnostic
-    expect(skills).not.toContain("csharp-patterns");
-  });
-
-  test("domain=code-review returns both fixture cards", () => {
-    const result = filterCards(allCards, { domain: ["code-review"] });
-    expect(result).toHaveLength(2);
-  });
-
-  test("phase=review returns both fixture cards", () => {
-    const result = filterCards(allCards, { phase: ["review"] });
-    expect(result).toHaveLength(2);
-  });
-
-  test("AND across dimensions — language=dotnet AND layer=reference", () => {
-    const result = filterCards(allCards, {
-      language: ["dotnet"],
-      layer: ["reference"],
-    });
-    const skills = result.map((c) => c.skill);
-    expect(skills).toEqual(["csharp-patterns"]);
-  });
-
-  test("empty filter returns all cards", () => {
-    const result = filterCards(allCards, {});
-    expect(result).toHaveLength(allCards.length);
-  });
-
-  test("no match returns empty array", () => {
-    const result = filterCards(allCards, { domain: ["api"] });
-    expect(result).toHaveLength(0);
-  });
-});
-
-// ─── sortCards ────────────────────────────────────────────────────────────────
-
-describe("sortCards", () => {
-  test("returns same count as input", () => {
-    const sorted = sortCards(allCards, vocab);
-    expect(sorted).toHaveLength(allCards.length);
-  });
-
-  test("does not mutate original array", () => {
-    const original = [...allCards];
-    sortCards(allCards, vocab);
-    expect(allCards.map((c) => c.skill)).toEqual(original.map((c) => c.skill));
-  });
-});
-
-// ─── legacyFields detection (set by parseCard) ────────────────────────────────
-
-describe("legacyFields", () => {
-  test("clean v2 card has empty legacyFields", () => {
-    const sr = allCards.find((c) => c.skill === "strict-review");
-    expect(sr?.legacyFields).toEqual([]);
+  test("cards are sorted alphabetically by type then name", () => {
+    const keys = result.cards.map((c) => `${c.id.type}/${c.id.name}`);
+    expect(keys).toEqual([...keys].sort());
   });
 });

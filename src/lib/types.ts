@@ -1,84 +1,93 @@
-export interface TagSet {
-  phase: string[];
-  domain: string[];
-  language: string;
-  layer: string;
-  concerns: string[];
+/**
+ * Implementation contract per SPEC-tagen.
+ *
+ * Card identity is the dir path: type = parent dir name, name = card dir name.
+ * Frontmatter carries no `type:` or `name:` — the filesystem is the taxonomy.
+ */
+
+export type CardType = string;
+
+export interface CardId {
+  type: CardType;
+  name: string;
 }
 
-export interface SurfaceTier {
-  triggers: string[];
+/** Canonical "<type>/<name>" key used by every index, error message, and CLI output. */
+export function cardKey(id: CardId): string {
+  return `${id.type}/${id.name}`;
 }
 
-export interface CoreTier {
-  files: string[];
+/** Type and card dir names must match this — enforced by `tagen validate`. */
+export const KEBAB_NAME = /^[a-z][a-z0-9-]*$/;
+
+/** Card types allowed to declare `subagents:` and ship `validators/`. */
+export const SUBAGENT_HOST_TYPES: ReadonlySet<CardType> = new Set([
+  "review",
+  "methodology",
+]);
+
+export interface CardFrontmatter {
+  description: string;
+  aliases?: string[];
+  requires?: CardType[];
+  /** review/methodology only */
+  subagents?: string[];
+  /** subagent only */
+  model?: "haiku" | "sonnet" | "opus";
 }
 
-export interface DeepTier {
-  subagents: string[];
-  refs: string[];
-  slots: Record<string, true>;
+export interface Card {
+  id: CardId;
+  /** Absolute dir path: <root>/brain/<type>/<name>/ */
+  dirPath: string;
+  /** Absolute path to CORE.md */
+  corePath: string;
+  frontmatter: CardFrontmatter;
+  body: string;
+  /** Root-relative paths to references/*.md */
+  references: string[];
+  /** Root-relative paths to validators/*.ts (review/methodology only) */
   validators: string[];
 }
 
-export interface CatalogCard {
-  skill: string;
-  description: string;
-  summary: string[];
-  tags: TagSet;
-  provides: string[];
-  requires: string[];
-  emits: string[];
-  consumes: string[];
-  surface: SurfaceTier;
-  core: CoreTier;
-  deep: DeepTier;
-  body: string;
-  filePath: string;
-  /**
-   * Legacy v1 frontmatter keys present in the file. Empty for clean v2 cards.
-   * Populated by parseCard; consumed by `tagen validate` to hard-error per
-   * SPEC-tagen Legacy field rejection. Not part of the manifest contract.
-   */
-  legacyFields: string[];
+export interface Protocol extends Card {
+  /** Root-relative path to schema.json */
+  schemaPath: string;
+  /** Root-relative path to validator.ts */
+  validatorPath: string;
+  /** Root-relative paths to examples/valid/*.json */
+  validExamples: string[];
+  /** Root-relative paths to examples/invalid/*.json */
+  invalidExamples: string[];
 }
 
-export interface VocabularyDimension {
-  description: string;
-  order?: string[];
-  values: Record<string, string>;
+export interface ResolvedSlot {
+  type: CardType;
+  fillerCard: string;
+  /** Alphabetical names of all candidates */
+  candidates: string[];
 }
 
-export interface Vocabulary {
-  dimensions: Record<string, VocabularyDimension>;
-  relationships: Record<string, string>;
-}
-
-export interface CapabilityRegistry {
-  /** Map of capability name → optional description. */
-  capabilities: Record<string, string>;
-}
-
-export interface ProtocolEntry {
-  name: string;
-  dirPath: string;
-  hasSchema: boolean;
-  hasDoc: boolean;
-  hasValidator: boolean;
-  hasValidExamples: boolean;
-  hasInvalidExamples: boolean;
-}
-
-export type SubagentModel = "haiku" | "sonnet" | "opus";
-
-export interface Subagent {
-  name: string;
-  /** Constrained to known model values; loader rejects unknown strings. */
-  model: SubagentModel;
-  description: string;
-  consumes: string[];
-  emits: string[];
+export interface FilledSlot {
+  /** Root-relative path */
+  core: string;
+  /** Root-relative paths */
   references: string[];
-  body: string;
-  filePath: string;
+}
+
+export interface Manifest {
+  /** Absolute path of the marketplace dir. All other paths are relative to this. */
+  root: string;
+  modules: Array<CardId & { core: string }>;
+  /** Root-relative paths from non-filler cards */
+  core: string[];
+  /** Root-relative paths from non-filler cards */
+  references: string[];
+  filled: Record<CardType, FilledSlot>;
+  slots: ResolvedSlot[];
+  /** Root-relative paths to brain/subagent/<name>/CORE.md */
+  subagents: string[];
+  /** Root-relative paths to review/methodology card validators */
+  validators: string[];
+  warnings: string[];
 }

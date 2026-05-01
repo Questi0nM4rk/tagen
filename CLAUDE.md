@@ -1,8 +1,11 @@
 # CLAUDE.md — tagen
 
-Standalone read-only CLI for the qsm-marketplace skill-graph.
-Reads catalog cards, vocabulary, capabilities, protocols, and subagents from a calling project's
-`skill-graph/` directory and emits a JSON manifest naming everything the agent should load for a tag query.
+Standalone read-only CLI that walks a calling project's `brain/<type>/<name>/`
+directory tree of typed cards and emits a JSON composition manifest.
+
+The directory tree IS the vocabulary — no `vocabulary.yaml`, no `capabilities.yaml`,
+no `tags:` / `provides:` / `emits:` / `consumes:` frontmatter. Five frontmatter
+fields exist: `description`, `aliases`, `requires`, `subagents`, `model`.
 
 Spec: `docs/specs/SPEC-tagen.md`. Manifest contract: `docs/tagen-get-manifest.schema.json`.
 
@@ -12,42 +15,33 @@ Spec: `docs/specs/SPEC-tagen.md`. Manifest contract: `docs/tagen-get-manifest.sc
 
 | Command | Description |
 |---------|-------------|
-| `tagen validate` | Validate all cards, protocols, and subagents; non-zero exit on any error |
-| `tagen list` | List catalog cards; `--filter key=value` for tag filtering |
-| `tagen get` | Resolve a composition into a JSON manifest (`--json`) |
-| `tagen add` | Scaffold a new catalog card interactively |
+| `tagen list` | List catalog cards as `<type>/<name>`. Flags: `--type T`, `--aliases`, `--json` |
+| `tagen validate` | Walk the tree, report every rule violation, non-zero exit on any |
+| `tagen get` | Resolve a composition into a JSON manifest (`--json`). Bare type-name args trigger browse intent |
+| `tagen add` | Interactive scaffold for a new card (the only writer) |
 
 All commands are read-only except `add`.
 
 ---
 
-## Skill-Graph Discovery
+## Brain Discovery
 
-`findVaultDir()` walks up from `process.cwd()` up to 10 parent directories, looking for
-`skill-graph/vocabulary.yaml`. No config file needed — run `tagen` from anywhere inside a marketplace repo.
+`findBrainDir()` walks up from `process.cwd()` up to 10 parent directories,
+looking for a `brain/` directory with at least one `<type>/<name>/CORE.md`. No
+config file needed — run `tagen` from anywhere inside a marketplace repo.
 
 ---
 
 ## Development
 
 ```bash
-# Pin runtime via mise (.mise.toml in repo root)
-mise install               # ensures bun matches the pinned version
-
-# Run tests
-bun test
-
-# Typecheck
-bun run typecheck          # tsgo --noEmit
-
-# Build standalone binary (GitHub releases)
-bun run build              # → bin/tagen
-
-# Build npm bundle (~250KB JS)
-bun run build:npm          # → bin/tagen.js
-
-# Run directly during development
-bun run src/main.ts <command>
+mise install                   # ensures bun matches the pinned version
+bun test                       # full suite (unit + BDD)
+bun run typecheck              # tsgo --noEmit
+bun run lint                   # biome check
+bun run build                  # → bin/tagen (standalone binary)
+bun run build:npm              # → bin/tagen.js (npm bundle)
+bun run src/main.ts <command>  # run directly during development
 ```
 
 ---
@@ -63,13 +57,11 @@ src/
 │   ├── list.ts             # tagen list
 │   └── validate.ts         # tagen validate
 ├── lib/
-│   ├── types.ts            # CatalogCard, Subagent, Manifest, Vocabulary, …
-│   ├── catalog.ts          # findVaultDir(), loadAllCards(), filterCards()
-│   ├── vocabulary.ts       # loadVocabulary(), validateCard()
-│   ├── capabilities.ts     # loadCapabilities(), isValidCapability()
-│   ├── protocols.ts        # loadProtocols(), isValidProtocol()
-│   ├── subagents.ts        # loadSubagents()
-│   └── compose.ts          # compose(), buildManifest()
+│   ├── types.ts            # Card, CardFrontmatter, Manifest, …
+│   ├── catalog.ts          # findBrainDir(), loadAllCards(), marketplaceRoot()
+│   ├── frontmatter.ts      # parseCore() with strict per-type field allowlist
+│   ├── fuzzy.ts            # exact > prefix > substring > Levenshtein matcher
+│   └── compose.ts          # compose(), buildManifest(), knownTypesFromCards()
 └── validator-runtime.ts    # @questi0nm4rk/tagen/validator-runtime export
 ```
 
@@ -81,26 +73,24 @@ Each command exports a `run<Name>(...): Promise<void> | void`. `main.ts` dispatc
 
 ```
 __tests__/
-├── fixtures/
-│   ├── skill-graph/             # canonical clean fixture (vocabulary,
-│   │                            # capabilities, protocols, skills, subagents)
-│   ├── skill-graph-with-issues/ # parallel fixture for tests that need
-│   │                            # intentionally-broken inputs (incomplete
-│   │                            # protocol dir, bad-name / bad-model subagents)
-│   └── brain/                   # stubs satisfying core.files / deep.refs /
-│                                # deep.validators path checks for the canonical
-│                                # fixture's strict-review and csharp-patterns
-├── catalog.test.ts              # findVaultDir, loadAllCards, legacyFields
-├── vocabulary.test.ts           # validateCard, dimension rules
-├── capabilities.test.ts         # loadCapabilities
-├── protocols.test.ts            # loadProtocols (uses both fixtures)
-├── subagents.test.ts            # loadSubagents (uses both fixtures)
-├── compose.test.ts              # compose(), buildManifest()
-├── validate.test.ts             # full validate pipeline
-└── manifest-contract.test.ts    # `tagen get --json` against tagen-get-manifest.schema.json
+├── fixtures/brain/         # canonical synthetic fixture (8 types, 11 cards)
+├── helpers/capture.ts      # stdout/stderr capture for command-level tests
+├── catalog.test.ts         # findBrainDir, loadAllCards, marketplaceRoot
+├── frontmatter.test.ts     # parseCore + per-type allowlist enforcement
+├── fuzzy.test.ts           # tier ordering, 3-char min, ambiguity
+├── compose.test.ts         # resolution algorithm end-to-end
+├── list.test.ts            # text + JSON output, --type, --aliases
+├── validate.test.ts        # clean fixture passes; broken-fixture clones per rule class
+├── get.test.ts             # manifest + browse intent + exit codes
+├── add.test.ts             # scaffoldCard frontmatter shape + interactive scaffold
+├── manifest-contract.test.ts # `tagen get --json` validated against the schema
+├── perf.test.ts            # 100-card synthetic fixture < 500ms
+└── cli.test.ts             # --help / --version / unknown command
 ```
 
-Tests use `__tests__/fixtures/skill-graph/` as the vault root — no real marketplace dependency.
+Tests use `__tests__/fixtures/brain/` as the canonical fixture; broken-fixture
+scenarios in `validate.test.ts` clone it into a temp dir and mutate before
+running. No real marketplace dependency.
 
 ---
 
@@ -108,35 +98,40 @@ Tests use `__tests__/fixtures/skill-graph/` as the vault root — no real market
 
 ```
 features/
-├── validate.feature
 ├── list.feature
+├── validate.feature
 ├── get.feature
-└── add.feature
+├── add.feature             # CLI shape only — interactive flow covered by add.test.ts
+└── steps/
+    ├── shared.ts           # World type, runTagen(), cloneFixtureBrain()
+    └── common.steps.ts     # all step definitions in one file (CucumberExpression syntax)
 ```
 
-One `.feature` per command, full edge-matrix coverage. Uses `@questi0nm4rk/feats`. Run with `bun test`.
+Run with `bun test`. Step patterns use `{int}`, `{string}`, `{word}`, `{}` —
+not RegExp.
 
 ---
 
 ## Development Workflow
 
-1. Write a failing feature scenario (or unit test if internal-only)
+1. Write a failing test (unit or BDD)
 2. Implement the minimum to pass
-3. Run `bun test` — must be green
-4. Run `bun run typecheck` — must be clean
-5. Commit (conventional commits)
+3. `bun test` — must be green
+4. `bun run typecheck` — must be clean
+5. `bun run lint` — must be clean
+6. Commit (conventional commits)
 
-Never claim done if `bun test` or `bun run typecheck` haven't been run green in the current session.
+Never claim done if `bun test`, `bun run typecheck`, or `bun run lint` haven't been run green in the current session.
 
 ---
 
 ## Adding a Command
 
 1. Create `src/commands/<name>.ts`
-2. Export `export async function run<Name>(args): Promise<void>` (or sync `void`)
+2. Export `run<Name>(args): Promise<void> | void`
 3. Register in `src/main.ts` dispatch
-4. Add `__tests__/<name>.test.ts` for unit coverage
-5. Add `features/<name>.feature` + `features/steps/<name>.steps.ts`
+4. Add `__tests__/<name>.test.ts`
+5. Add scenarios to `features/<name>.feature` (steps go in `common.steps.ts`)
 
 ---
 
@@ -145,14 +140,14 @@ Never claim done if `bun test` or `bun run typecheck` haven't been run green in 
 Every file in `src/`, `__tests__/`, and `features/` must follow:
 
 - **Modular** — one file, one responsibility. Split by behaviour, not by size.
-- **Reusable** — shared helpers go in `src/lib/` (or `features/steps/common.steps.ts` for BDD); never copy-paste.
-- **KISS** — simplest construct that works. No premature abstraction, no factories wrapping a single call.
+- **Reusable** — shared helpers go in `src/lib/`; never copy-paste.
+- **KISS** — simplest construct that works. No premature abstraction.
 - **DRY** — same shape in two places → extract.
 
 Reviews (including `/simplify`) enforce the same rules. Flag and fix:
 
 - Functions > ~50 lines or doing more than one thing → split.
-- Duplicated literals, regex, or string templates in 2+ files → shared helper.
+- Duplicated literals/regex/templates in 2+ files → shared helper.
 - Classes / wrappers around a single function call → unwrap.
 - Config-object parameters with > 4 fields when 2 positional args suffice.
 - Runtime assertions that re-check what the type system already proves.
@@ -162,21 +157,25 @@ Reviews (including `/simplify`) enforce the same rules. Flag and fix:
 
 ## Key Design Decisions
 
-### Language filter — inclusive
-`tagen list/get --language python` matches `python` OR `agnostic`.
-Single-string field; two specific languages → split into two cards.
+### The directory tree IS the vocabulary
+Adding a new type = `mkdir brain/<newtype>/`. Adding a new card =
+`mkdir brain/<type>/<name>/`. Renames are `mv`. No registry file to keep in sync.
 
 ### Convention over configuration
-`tagen` finds the skill-graph by walking up from CWD looking for `skill-graph/vocabulary.yaml`.
-No `.tagenrc`, no `tagen.config.ts`.
+`tagen` finds the brain by walking up from CWD looking for
+`brain/<type>/<name>/CORE.md`. No `.tagenrc`, no `tagen.config.ts`.
 
-### Vocabulary in marketplace, not in tagen
-`vocabulary.yaml`, `capabilities.yaml`, `protocols/`, and `subagents/` all live under the
-marketplace's `skill-graph/`. Adding a new tag value, capability, protocol, or subagent never
-requires a tagen release.
+### Strict per-type frontmatter allowlist
+Every type has an exact allowed-field set. `subagents:` is review/methodology
+only. `model:` is subagent only. Anything outside the allowlist for a given
+type is a `tagen validate` error.
 
 ### Read-only by contract
 Every command except `add` is read-only. `tagen get` writes the manifest to stdout, warnings to stderr.
+
+### `tools/` is not tagen's concern
+Tagen never reads `tools/*/.claude-plugin/plugin.json`. That's Anthropic's
+schema and Claude Code's responsibility.
 
 ---
 

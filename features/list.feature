@@ -1,32 +1,28 @@
-Feature: tagen list — display skill catalog
+Feature: tagen list — browse the catalog
 
-  Scenario: list shows all skills
-    Given a skill-graph with catalog cards
-    When I run "tagen list"
-    Then it prints both fixture skill names
+  Scenario: lists every card as <type>/<name>
+    Given the canonical fixture brain
+    When I run tagen with args list
+    Then it exits 0
+    And stdout contains "lang/csharp"
+    And stdout contains "review/strict"
+    And stdout contains "subagent/security-reviewer"
 
-  Scenario: list filters by --language (inclusive of agnostic)
-    Given a skill-graph with catalog cards
-    When I run "tagen list --language dotnet"
-    Then it shows dotnet and agnostic skills
+  Scenario: --type restricts to one type dir
+    Given the canonical fixture brain
+    When I run tagen with args list --type lang
+    Then it exits 0
+    And stdout contains exactly the lines lang/csharp,lang/python,lang/rust
 
-  Scenario: list filters by --domain (repeatable)
-    Given a skill-graph with catalog cards
-    When I run "tagen list --domain code-review"
-    Then it prints both fixture skill names
+  Scenario: --aliases adds parenthesised alias list
+    Given the canonical fixture brain
+    When I run tagen with args list --aliases
+    Then it exits 0
+    And stdout contains "lang/csharp  (dotnet)"
 
-  Scenario: list --subagents lists subagents instead of cards
-    Given a skill-graph with catalog cards
-    When I run "tagen list --subagents"
-    Then it prints the domain-reviewer subagent
-
-  Scenario: list --json outputs valid JSON array
-    Given a skill-graph with catalog cards
-    When I run "tagen list --json"
-    Then stdout is valid JSON
-    And it contains an array of skill objects
-
-  Scenario: list text output includes provides, requires, and tier counts
-    Given a skill-graph with catalog cards
-    When I run "tagen list --domain code-review"
-    Then it prints provides, requires, and tier counts per card
+  Scenario: --json outputs structured entries
+    Given the canonical fixture brain
+    When I run tagen with args list --json
+    Then it exits 0
+    And stdout is valid JSON
+    And the JSON array contains an entry with type lang and name csharp

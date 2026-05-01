@@ -1,254 +1,198 @@
-import { existsSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { allCapabilities, isValidCapability } from "../lib/capabilities";
-import { isValidProtocol } from "../lib/protocols";
-import { filenameStem } from "../lib/subagents";
-import type {
-  CapabilityRegistry,
-  CatalogCard,
-  ProtocolEntry,
-  Subagent,
-  SubagentModel,
-  Vocabulary,
-} from "../lib/types";
-import { validateCard } from "../lib/vocabulary";
-
-const VALID_MODELS: readonly SubagentModel[] = ["haiku", "sonnet", "opus"] as const;
-
-interface CardCtx {
-  capabilities: CapabilityRegistry;
-  protocols: ProtocolEntry[];
-  subagentNames: Set<string>;
-  validCapabilitiesList: string;
-  vocab: Vocabulary;
-  root: string;
-}
-
-function checkCard(card: CatalogCard, ctx: CardCtx): string[] {
-  const errors: string[] = [];
-  const prefix = `[${card.skill}]`;
-
-  if (!card.description) {
-    errors.push(`${prefix} missing required field: description`);
-  }
-
-  errors.push(...validateCard(card, ctx.vocab));
-
-  for (const legacy of card.legacyFields) {
-    errors.push(
-      `${prefix} legacy field '${legacy}' no longer supported (rename per SPEC-tagen)`
-    );
-  }
-
-  for (const cap of card.provides) {
-    if (!isValidCapability(ctx.capabilities, cap)) {
-      errors.push(
-        `${prefix} unknown capability in provides: "${cap}" (valid: ${ctx.validCapabilitiesList})`
-      );
-    }
-  }
-  for (const cap of card.requires) {
-    if (!isValidCapability(ctx.capabilities, cap)) {
-      errors.push(`${prefix} unknown capability in requires: "${cap}"`);
-    }
-  }
-  for (const slotCap of Object.keys(card.deep.slots)) {
-    if (!isValidCapability(ctx.capabilities, slotCap)) {
-      errors.push(`${prefix} unknown capability in deep.slots: "${slotCap}"`);
-    }
-  }
-  for (const proto of card.emits) {
-    if (!isValidProtocol(ctx.protocols, proto)) {
-      errors.push(`${prefix} unknown protocol in emits: "${proto}"`);
-    }
-  }
-  for (const proto of card.consumes) {
-    if (!isValidProtocol(ctx.protocols, proto)) {
-      errors.push(`${prefix} unknown protocol in consumes: "${proto}"`);
-    }
-  }
-
-  for (const subName of card.deep.subagents) {
-    if (!ctx.subagentNames.has(subName)) {
-      errors.push(`${prefix} unknown subagent in deep.subagents: "${subName}"`);
-    }
-  }
-
-  const brainRoot = resolve(ctx.root, "brain", card.skill);
-  for (const p of [...card.core.files, ...card.deep.refs]) {
-    if (!existsSync(resolve(brainRoot, p))) {
-      errors.push(`${prefix} path not found: brain/${card.skill}/${p}`);
-    }
-  }
-  for (const p of card.deep.validators) {
-    const full = resolve(brainRoot, p);
-    if (!existsSync(full)) {
-      errors.push(`${prefix} path not found: brain/${card.skill}/${p}`);
-      continue;
-    }
-    if (!isExecutable(full)) {
-      errors.push(`${prefix} card validator not executable: brain/${card.skill}/${p}`);
-    }
-  }
-
-  return errors;
-}
-
-/**
- * Check whether a file has an executable mode bit set for owner/group/other.
- * Validators run as `bun <script>` (stdin → exit-code), so the strict criterion
- * is "any +x bit". A directory or special file fails.
- */
-function isExecutable(path: string): boolean {
-  try {
-    const st = statSync(path);
-    if (!st.isFile()) return false;
-    return (st.mode & 0o111) !== 0;
-  } catch {
-    return false;
-  }
-}
-
-function checkProtocol(p: ProtocolEntry): string[] {
-  const errors: string[] = [];
-  const prefix = `[protocol:${p.name}]`;
-  if (!p.hasSchema) errors.push(`${prefix} missing schema.json`);
-  if (!p.hasDoc) errors.push(`${prefix} missing protocol.md`);
-  if (!p.hasValidator) {
-    errors.push(`${prefix} missing validator.ts`);
-  } else {
-    const validatorPath = join(p.dirPath, "validator.ts");
-    if (!isExecutable(validatorPath)) {
-      errors.push(`${prefix} validator.ts not executable`);
-    }
-  }
-  if (!p.hasValidExamples) {
-    errors.push(`${prefix} missing examples/valid/*.json (need at least one)`);
-  }
-  if (!p.hasInvalidExamples) {
-    errors.push(`${prefix} missing examples/invalid/*.json (need at least one)`);
-  }
-  return errors;
-}
-
-function checkSubagent(
-  sub: Subagent,
-  capabilities: CapabilityRegistry,
-  protocols: ProtocolEntry[]
-): string[] {
-  const errors: string[] = [];
-  const prefix = `[subagent:${sub.name}]`;
-
-  const stem = filenameStem(sub.filePath);
-  if (sub.name !== stem) {
-    errors.push(
-      `${prefix} frontmatter name "${sub.name}" does not match filename "${stem}.md"`
-    );
-  }
-
-  if (!sub.model) {
-    errors.push(`${prefix} missing required frontmatter field: model`);
-  } else if (!VALID_MODELS.includes(sub.model)) {
-    errors.push(
-      `${prefix} unknown model "${sub.model}" (valid: ${VALID_MODELS.join(", ")})`
-    );
-  }
-
-  if (!sub.description) {
-    errors.push(`${prefix} missing required frontmatter field: description`);
-  }
-
-  for (const p of sub.consumes) {
-    if (!isValidProtocol(protocols, p)) {
-      errors.push(`${prefix} unknown protocol in consumes: "${p}"`);
-    }
-  }
-  for (const p of sub.emits) {
-    if (!isValidProtocol(protocols, p)) {
-      errors.push(`${prefix} unknown protocol in emits: "${p}"`);
-    }
-  }
-  for (const cap of sub.references) {
-    if (!isValidCapability(capabilities, cap)) {
-      errors.push(`${prefix} unknown capability in references: "${cap}"`);
-    }
-  }
-  return errors;
-}
-
-function dupErrors<T>(
-  items: T[],
-  key: (t: T) => string,
-  prefix: (k: string) => string
-): string[] {
-  const seen = new Set<string>();
-  const errors: string[] = [];
-  for (const item of items) {
-    const k = key(item);
-    if (seen.has(k)) errors.push(prefix(k));
-    seen.add(k);
-  }
-  return errors;
-}
+import { existsSync, readFileSync, statSync } from "node:fs";
+import Ajv from "ajv";
+import { bodyLineCount } from "../lib/frontmatter.ts";
+import {
+  type Card,
+  cardKey,
+  KEBAB_NAME,
+  type Protocol,
+  SUBAGENT_HOST_TYPES,
+} from "../lib/types.ts";
 
 export interface ValidateOptions {
   verbose: boolean;
 }
 
-export function runValidate(
-  cards: CatalogCard[],
-  vocab: Vocabulary,
-  capabilities: CapabilityRegistry,
-  protocols: ProtocolEntry[],
-  subagents: Subagent[],
-  root: string,
-  opts: ValidateOptions = { verbose: false }
-): void {
-  const ctx: CardCtx = {
-    capabilities,
-    protocols,
-    subagentNames: new Set(subagents.map((s) => s.name)),
-    validCapabilitiesList: allCapabilities(capabilities).join(", ") || "none loaded",
-    vocab,
-    root,
-  };
+interface ValidationContext {
+  cards: Card[];
+  protocols: Protocol[];
+  /** Absolute marketplace root (parent of brain/). Used to read disk paths. */
+  root: string;
+  /** Frontmatter parse errors keyed by `<type>/<name>`. */
+  frontmatterErrors: Map<string, string[]>;
+  /** Set of every type dir name under brain/. */
+  knownTypes: Set<string>;
+  /** Index keyed by `<type>/<name>`. */
+  index: Map<string, Card>;
+}
 
-  const errors: string[] = [
-    ...dupErrors(
-      cards,
-      (c) => c.skill,
-      (k) => `[${k}] duplicate skill name`
-    ),
-    ...cards.flatMap((c) => checkCard(c, ctx)),
-    ...protocols.flatMap(checkProtocol),
-    ...dupErrors(
-      subagents,
-      (s) => s.name,
-      (k) => `[subagent:${k}] duplicate subagent name`
-    ),
-    ...subagents.flatMap((s) => checkSubagent(s, capabilities, protocols)),
-  ];
+/**
+ * Walk every rule, print every violation, never fast-fail. Exits 0 on a clean
+ * tree, 1 on any violation. Caller resolves `cards`/`protocols`/`knownTypes`
+ * via the catalog loader.
+ */
+export function runValidate(ctx: ValidationContext, opts: ValidateOptions): void {
+  const violations: string[] = [];
+
+  for (const card of ctx.cards) {
+    checkFilesystem(card, violations);
+    const fmErrors = ctx.frontmatterErrors.get(`${cardKey(card.id)}`);
+    if (fmErrors)
+      for (const e of fmErrors) violations.push(`${cardKey(card.id)}: ${e}`);
+    checkRequires(card, ctx, violations);
+    checkSubagentReferences(card, ctx, violations);
+    checkValidatorScope(card, violations);
+  }
+
+  checkAliasesGlobal(ctx.cards, violations);
+  for (const proto of ctx.protocols) checkProtocol(proto, ctx.root, violations);
 
   if (opts.verbose) {
-    for (const c of cards) {
-      process.stdout.write(`[${c.skill}] checked\n`);
-    }
-    for (const s of subagents) {
-      process.stdout.write(`[subagent:${s.name}] checked\n`);
-    }
-    for (const p of protocols) {
-      process.stdout.write(`[protocol:${p.name}] checked\n`);
-    }
-  }
-
-  if (errors.length === 0) {
-    process.stdout.write(
-      `All ${cards.length} card(s), ${subagents.length} subagent(s), ${protocols.length} protocol(s) valid.\n`
+    process.stderr.write(
+      `tagen: scanned ${ctx.cards.length} card(s); ${violations.length} violation(s)\n`
     );
-    process.exit(0);
   }
 
-  process.stderr.write(`${errors.length} error(s):\n`);
-  for (const err of errors) process.stderr.write(`  ${err}\n`);
-  process.exit(1);
+  if (violations.length > 0) {
+    process.stderr.write(violations.map((v) => `tagen: ${v}\n`).join(""));
+  }
+
+  process.exit(violations.length > 0 ? 1 : 0);
+}
+
+function checkFilesystem(card: Card, violations: string[]): void {
+  if (!KEBAB_NAME.test(card.id.name)) {
+    violations.push(`${cardKey(card.id)}: card name must match [a-z][a-z0-9-]*`);
+  }
+  if (!KEBAB_NAME.test(card.id.type)) {
+    violations.push(`${card.id.type}: type name must match [a-z][a-z0-9-]*`);
+  }
+  if (!existsSync(card.corePath) || !statSync(card.corePath).isFile()) {
+    violations.push(`${cardKey(card.id)}/CORE.md: must be a file`);
+    return;
+  }
+  const lines = bodyLineCount(card.body);
+  if (lines > 300) {
+    violations.push(
+      `${cardKey(card.id)}/CORE.md: exceeds 300 lines (got ${lines}); move overflow into references/`
+    );
+  }
+}
+
+function checkRequires(card: Card, ctx: ValidationContext, violations: string[]): void {
+  for (const req of card.frontmatter.requires ?? []) {
+    if (!ctx.knownTypes.has(req)) {
+      violations.push(`${cardKey(card.id)}: unknown type in requires: ${req}`);
+    }
+  }
+}
+
+function checkSubagentReferences(
+  card: Card,
+  ctx: ValidationContext,
+  violations: string[]
+): void {
+  if (!card.frontmatter.subagents?.length) return;
+  if (!SUBAGENT_HOST_TYPES.has(card.id.type)) {
+    violations.push(
+      `${cardKey(card.id)}: subagents allowed only on review and methodology cards`
+    );
+    return;
+  }
+  for (const name of card.frontmatter.subagents) {
+    if (!ctx.index.has(cardKey({ type: "subagent", name }))) {
+      violations.push(`${cardKey(card.id)}: unknown subagent in subagents: ${name}`);
+    }
+  }
+}
+
+function checkValidatorScope(card: Card, violations: string[]): void {
+  if (card.validators.length === 0) return;
+  if (!SUBAGENT_HOST_TYPES.has(card.id.type)) {
+    violations.push(
+      `${cardKey(card.id)}: validators/ allowed only on review and methodology cards`
+    );
+  }
+}
+
+function checkAliasesGlobal(cards: Card[], violations: string[]): void {
+  const aliases = new Map<string, { type: string; name: string }>();
+  const canonical = new Set<string>();
+  for (const c of cards) canonical.add(c.id.name);
+
+  for (const c of cards) {
+    for (const alias of c.frontmatter.aliases ?? []) {
+      if (canonical.has(alias)) {
+        const target = cards.find((x) => x.id.name === alias);
+        violations.push(
+          `${alias}: collides with canonical name ${target?.id.type ?? "?"}/${alias}`
+        );
+      }
+      const prior = aliases.get(alias);
+      if (prior) {
+        violations.push(
+          `${alias}: collides between ${cardKey(prior)} and ${cardKey(c.id)}`
+        );
+      } else {
+        aliases.set(alias, { type: c.id.type, name: c.id.name });
+      }
+    }
+  }
+}
+
+function checkProtocol(proto: Protocol, root: string, violations: string[]): void {
+  const tag = `protocol/${proto.id.name}`;
+  const schemaAbs = `${root}/${proto.schemaPath}`;
+  const validatorAbs = `${root}/${proto.validatorPath}`;
+
+  if (!existsSync(schemaAbs)) {
+    violations.push(`${tag}: missing schema.json`);
+    return;
+  }
+  if (!existsSync(validatorAbs)) {
+    violations.push(`${tag}: missing validator.ts`);
+  } else if ((statSync(validatorAbs).mode & 0o111) === 0) {
+    violations.push(`${tag}: validator.ts not executable`);
+  }
+
+  if (proto.validExamples.length === 0) {
+    violations.push(`${tag}: examples/valid must contain at least one .json payload`);
+  }
+  if (proto.invalidExamples.length === 0) {
+    violations.push(`${tag}: examples/invalid must contain at least one .json payload`);
+  }
+
+  let schema: object;
+  try {
+    schema = JSON.parse(readFileSync(schemaAbs, "utf8")) as object;
+  } catch (err) {
+    violations.push(`${tag}: schema.json parse error: ${(err as Error).message}`);
+    return;
+  }
+
+  const ajv = new Ajv({ allErrors: true });
+  const validate = ajv.compile(schema);
+
+  for (const ex of proto.validExamples) {
+    const exAbs = `${root}/${ex}`;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(readFileSync(exAbs, "utf8"));
+    } catch (err) {
+      violations.push(`${tag}: ${ex} parse error: ${(err as Error).message}`);
+      continue;
+    }
+    if (!validate(payload)) violations.push(`${tag}: ${ex} fails schema`);
+  }
+  for (const ex of proto.invalidExamples) {
+    const exAbs = `${root}/${ex}`;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(readFileSync(exAbs, "utf8"));
+    } catch (err) {
+      violations.push(`${tag}: ${ex} parse error: ${(err as Error).message}`);
+      continue;
+    }
+    if (validate(payload)) violations.push(`${tag}: ${ex} passes schema (should fail)`);
+  }
 }

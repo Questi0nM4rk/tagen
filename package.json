@@ -37,13 +37,13 @@
     "prepublishOnly": "bun run typecheck && bun test && bun run build:npm"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
     "yaml": "^2.8.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
     "@questi0nm4rk/feats": "^1.0.1",
     "@typescript/native-preview": "latest",
-    "ajv": "^8.20.0",
     "bun-types": "latest",
     "typescript": "^6.0.2"
   }

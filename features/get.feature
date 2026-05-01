@@ -1,36 +1,40 @@
-Feature: tagen get — resolve composition into a JSON manifest
+Feature: tagen get — resolve a composition into a JSON manifest
 
-  Scenario: --json flag emits manifest with all 9 top-level keys
-    Given a skill-graph with v2 cards that satisfy all requires
-    When I run "tagen get --language dotnet --json"
+  Scenario: positional fuzzy match yields a manifest
+    Given the canonical fixture brain
+    When I run tagen with args get strict csharp --json
     Then it exits 0
     And stdout is valid JSON
-    And the manifest contains keys modules, core, subagents, refs, validators, emits, consumes, warnings, slots
+    And the manifest has every required field
 
-  Scenario: unmet requires yields warning in manifest.warnings but exits 0
-    Given a skill-graph with a card whose requires are not satisfied
-    When I run "tagen get --domain code-review --json"
+  Scenario: alias resolves
+    Given the canonical fixture brain
+    When I run tagen with args get strict dotnet --json
     Then it exits 0
     And stdout is valid JSON
-    And manifest.warnings is non-empty
-    And it prints warnings to stderr
+    And manifest.modules contains a card lang/csharp
 
-  Scenario: empty match set exits 2
-    Given a skill-graph with catalog cards
-    When I run "tagen get --domain data-processing --json"
+  Scenario: bare type-name positional triggers browse intent
+    Given the canonical fixture brain
+    When I run tagen with args get methodology
+    Then it exits 0
+    And stdout contains "methodology/tdd"
+
+  Scenario: get with no positional args exits 2 with no-cards-matched
+    Given the canonical fixture brain
+    When I run tagen with args get
     Then it exits 2
-    And it prints "No cards matched" to stderr
+    And stderr contains "no cards matched"
 
-  Scenario: non-JSON mode prints compact summary
-    Given a skill-graph with v2 cards that satisfy all requires
-    When I run "tagen get --language dotnet"
-    Then it exits 0
-    And it prints a compact summary line with card count and slot count
+  Scenario: ambiguous fuzzy exits 1
+    Given the canonical fixture brain
+    When I run tagen with args get dot --json
+    Then it exits 1
+    And stderr contains "ambiguous arg"
 
-  Scenario: --card override restricts matched set to named cards and resolves slots
-    Given a skill-graph with v2 cards that satisfy all requires
-    When I run "tagen get --card strict-review --card csharp-patterns --json"
+  Scenario: alphabetical-first slot fill with --pin override
+    Given the canonical fixture brain
+    When I run tagen with args get strict csharp python --pin lang=python --json
     Then it exits 0
     And stdout is valid JSON
-    And manifest.modules contains only the named cards
-    And manifest.slots is non-empty
+    And the lang slot is filled by python
