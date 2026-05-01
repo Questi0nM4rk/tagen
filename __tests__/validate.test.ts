@@ -272,6 +272,31 @@ describe("runValidate — broken cards", () => {
     }
   });
 
+  test("draft 2020-12 schemas validate without crashing", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      writeFileSync(
+        join(b, "protocol", "finding", "schema.json"),
+        JSON.stringify({
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          type: "object",
+          required: ["file", "line", "message"],
+          properties: {
+            file: { type: "string" },
+            line: { type: "integer", minimum: 1 },
+            message: { type: "string" },
+          },
+        })
+      );
+    });
+    try {
+      const { exitCode, stderr } = runAndCapture(brainDir);
+      expect(exitCode).toBe(0);
+      expect(stderr).toBe("");
+    } finally {
+      tearDown();
+    }
+  });
+
   test("protocol valid example fails schema → error", () => {
     const { brainDir, tearDown } = cloneFixture((b) => {
       writeFileSync(

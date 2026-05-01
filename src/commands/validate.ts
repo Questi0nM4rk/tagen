@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import Ajv from "ajv";
+import Ajv, { type ValidateFunction } from "ajv";
+import Ajv2020 from "ajv/dist/2020.js";
 import { bodyLineCount } from "../lib/frontmatter.ts";
 import {
   type Card,
@@ -140,6 +141,16 @@ function checkAliasesGlobal(cards: Card[], violations: string[]): void {
   }
 }
 
+/** Pick the right ajv variant based on the schema's `$schema` URI. Default
+ * Ajv handles draft-04/06/07; Ajv2020 handles 2019-09 and 2020-12. The two
+ * builds use disjoint keyword sets so we can't share a single instance. */
+function compileSchema(schema: { $schema?: string }): ValidateFunction {
+  const draft = schema.$schema ?? "";
+  const Variant =
+    draft.includes("2020-12") || draft.includes("2019-09") ? Ajv2020 : Ajv;
+  return new Variant({ allErrors: true }).compile(schema);
+}
+
 function checkProtocol(proto: Protocol, root: string, violations: string[]): void {
   const tag = `protocol/${proto.id.name}`;
   const schemaAbs = `${root}/${proto.schemaPath}`;
@@ -162,16 +173,21 @@ function checkProtocol(proto: Protocol, root: string, violations: string[]): voi
     violations.push(`${tag}: examples/invalid must contain at least one .json payload`);
   }
 
-  let schema: object;
+  let schema: { $schema?: string };
   try {
-    schema = JSON.parse(readFileSync(schemaAbs, "utf8")) as object;
+    schema = JSON.parse(readFileSync(schemaAbs, "utf8")) as { $schema?: string };
   } catch (err) {
     violations.push(`${tag}: schema.json parse error: ${(err as Error).message}`);
     return;
   }
 
-  const ajv = new Ajv({ allErrors: true });
-  const validate = ajv.compile(schema);
+  let validate: ValidateFunction;
+  try {
+    validate = compileSchema(schema);
+  } catch (err) {
+    violations.push(`${tag}: schema.json compile error: ${(err as Error).message}`);
+    return;
+  }
 
   for (const ex of proto.validExamples) {
     const exAbs = `${root}/${ex}`;
