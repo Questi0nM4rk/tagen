@@ -41,7 +41,7 @@ The dir tree IS the vocabulary because every alternative (YAML enum files, front
 - **Not a build system.** No plugin assembly. No content generation. No `marketplace.json` generation.
 - **Not a versioner.** Card names, type names, alias names, protocol names — all rewritten in place. No `@v1` suffixes. No migration shims.
 - **Not an auto-resolver.** Tagen never pulls transitive `requires:` from outside the user-specified matched set. It warns; the agent decides whether to broaden.
-- **Not a writer.** `tagen get`, `tagen list`, `tagen validate`, `tagen tags` all read-only. Only `tagen add` writes.
+- **Not a writer.** `tagen get`, `tagen list`, `tagen validate` all read-only. Only `tagen add` writes.
 - **Not a tag system.** No `tags:`, no `provides:`, no `capabilities.yaml`, no `vocabulary.yaml`. The directory tree is the entire vocabulary.
 - **Not aware of installed tools beyond their plugin.json verbs.** Tools live in `tools/`; tagen reads each plugin's `verbs:` array but does not invoke them.
 
@@ -136,10 +136,13 @@ aliases: [dotnet]                  # optional; query-time alternate names; globa
 requires: [lang]                   # optional; type names this card needs slot-filled
 emits: [review-artifact]           # optional; protocol names (= card names under brain/protocol/)
 consumes: [finding]                # optional; protocol names
+subagents: [security-reviewer]     # review/methodology only; names of subagents this card dispatches
 model: sonnet                      # subagent only; haiku | sonnet | opus
 ---
 
-# Body — short and dense.
+# Body — short and dense. Orchestration of subagents (order, parallel/sequential)
+# is described here in prose; the frontmatter array just lists which subagents
+# this card uses.
 ```
 
 Anything else in frontmatter is rejected by `tagen validate`.
@@ -148,7 +151,7 @@ Anything else in frontmatter is rejected by `tagen validate`.
 
 ## Commands
 
-Five commands. All read-only except `tagen add`.
+Four commands. All read-only except `tagen add`.
 
 ### `tagen get <args>`
 
@@ -169,13 +172,14 @@ Exit codes: 0 (manifest emitted, warnings allowed), 1 (validation error), 2 (no 
 
 ### `tagen list`
 
-Browse the catalog. By default lists every card as `<type>/<name>`.
+Browse the catalog. By default lists every card as `<type>/<name>`. With `--aliases`, prints each card's aliases beside its canonical name.
 
 ```
-tagen list [--type T] [--json]
+tagen list [--type T] [--aliases] [--json]
 ```
 
 - `--type T`: list only cards under `brain/<T>/`.
+- `--aliases`: include aliases for each card. Text mode prints `<type>/<name>  (alias1, alias2)`. JSON mode adds `aliases: string[]` to each entry.
 - `--json`: machine-readable output.
 
 Exit codes: 0 (success), 1 (validation error reading the tree).
@@ -191,14 +195,6 @@ tagen validate [--verbose]
 - `--verbose`: per-card per-rule trace.
 
 Exit codes: 0 (clean), 1 (violations), 2 (brain/ not found).
-
-### `tagen tags`
-
-Print the known types and (per type) the known names + aliases. The "tagen tags" name is preserved for compatibility but the output is the dir-tree's vocabulary, not a YAML file.
-
-```
-tagen tags [--json]
-```
 
 ### `tagen add`
 
@@ -251,12 +247,19 @@ Used by `tagen get`.
 7. For each card in matched set: resolve its references:
      for each file under <card-dir>/references/<topic>.md:
        append to that card's references[] list in the manifest
-8. Resolve emits/consumes: union of arrays across matched set.
-9. Resolve protocol validators: for every protocol in emits ∪ consumes, find brain/protocol/<name>/validator.ts.
-10. Resolve card validators: for review/methodology cards, list <card-dir>/validators/*.ts.
-11. Assemble manifest (see contract below).
-12. Output JSON to stdout. Warnings to stderr.
-13. Exit 0 (warnings ok), 1 (validation error), 2 (no matches).
+8. Resolve subagents: for every review/methodology card in the matched set, read its
+   `subagents:` frontmatter array. Union the names across cards. For each name, resolve to
+   `brain/subagent/<name>/CORE.md`. If a name doesn't resolve, warning "unknown subagent: <name>
+   referenced by <card>".
+9. Resolve emits/consumes: union of arrays across matched set.
+10. Resolve protocol validators: for every protocol in emits ∪ consumes, find brain/protocol/<name>/validator.ts.
+11. Resolve card validators: for review/methodology cards, list <card-dir>/validators/*.ts.
+12. Resolve tools: read every tools/*/.claude-plugin/plugin.json `verbs:` array. For each verb whose
+    `accepts:` is in the matched set's `emits[]`, add `{ <verb-name>: <plugin.json path> }` to tools{}.
+13. Set `root` = the absolute path of the marketplace dir tagen discovered.
+14. Assemble manifest with all paths root-relative (see contract below).
+15. Output JSON to stdout. Warnings to stderr.
+16. Exit 0 (warnings ok), 1 (validation error), 2 (no matches).
 ```
 
 ---
@@ -265,8 +268,11 @@ Used by `tagen get`.
 
 The output of `tagen get`. **Stable contract** — breaking changes need a dedicated PR with consumer updates in lockstep.
 
+All paths in the manifest are relative to the top-level `root` field — the absolute path of the marketplace directory tagen discovered. The agent resolves any path with `root + "/" + path`. This makes the manifest dir-agnostic: the same card content works regardless of where the marketplace lives on disk.
+
 ```json
 {
+  "root": "/home/user/Projects/qsm-marketplace",
   "modules": [
     { "type": "review", "name": "strict", "core": "brain/review/strict/CORE.md" },
     { "type": "lang",   "name": "csharp", "core": "brain/lang/csharp/CORE.md" }
@@ -275,8 +281,9 @@ The output of `tagen get`. **Stable contract** — breaking changes need a dedic
     "brain/review/strict/CORE.md"
   ],
   "references": [
-    { "module": "review/strict", "path": "brain/review/strict/references/workflow-detail.md" },
-    { "module": "review/strict", "path": "brain/review/strict/references/anti-examples.md" }
+    "brain/review/strict/references/workflow.md",
+    "brain/review/strict/references/iron-laws.md",
+    "brain/review/strict/references/output-format.md"
   ],
   "filled": {
     "lang": {
@@ -296,29 +303,26 @@ The output of `tagen get`. **Stable contract** — breaking changes need a dedic
     }
   ],
   "subagents": [
-    {
-      "name": "security-reviewer",
-      "model": "sonnet",
-      "core": "brain/subagent/security-reviewer/CORE.md",
-      "consumes": ["recon-summary"],
-      "emits": ["finding"]
-    }
+    "brain/subagent/ai-slop-researcher/CORE.md",
+    "brain/subagent/review-suggestion-researcher/CORE.md",
+    "brain/subagent/security-reviewer/CORE.md",
+    "brain/subagent/architecture-reviewer/CORE.md",
+    "brain/subagent/review-validator/CORE.md"
   ],
   "validators": {
     "protocol": [
-      { "protocol": "review-artifact", "path": "brain/protocol/review-artifact/validator.ts" }
+      "brain/protocol/review-artifact/validator.ts",
+      "brain/protocol/finding/validator.ts"
     ],
     "card": [
-      { "module": "review/strict", "path": "brain/review/strict/validators/no-emoji.ts" }
+      "brain/review/strict/validators/no-emoji.ts",
+      "brain/review/strict/validators/imperative-mood.ts",
+      "brain/review/strict/validators/no-severity-labels.ts"
     ]
   },
-  "tools": [
-    {
-      "plugin": "qsm-github",
-      "verb": "post-review",
-      "accepts": "review-artifact"
-    }
-  ],
+  "tools": {
+    "post-review": "tools/qsm-github/.claude-plugin/plugin.json"
+  },
   "emits": ["review-artifact"],
   "consumes": ["finding", "recon-summary"],
   "warnings": []
@@ -329,14 +333,16 @@ The output of `tagen get`. **Stable contract** — breaking changes need a dedic
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `modules` | array | Every card in the matched set, with its core path. |
-| `core` | string[] | CORE.md paths from non-filler cards (i.e. methodology cards, not slot fillers). The agent loads these immediately. |
-| `references` | array of `{ module, path }` | Reference files the agent CAN load on demand. Grouped by source card. |
-| `filled` | object keyed by type | One entry per slot the methodology required. Each entry has the chosen filler's `core` and `references`. The agent loads `core` immediately and decides per-task which `references` to pull. |
+| `root` | string | Absolute path of the marketplace dir. All other paths are relative to this. |
+| `modules` | array | Every card in the matched set, with `type` / `name` / `core` path. |
+| `core` | string[] | CORE.md paths from non-filler cards (methodologies, not slot fillers). Agent loads these immediately. |
+| `references` | string[] | Reference file paths from non-filler cards. Pull-on-demand; agent reads them only if the task warrants it. |
+| `filled` | object keyed by type | One entry per slot the methodology required. Each entry has `core` (load immediately) and `references` (pull-on-demand). |
 | `slots` | array | Slot resolution metadata: type, chosen filler, all candidates. |
-| `subagents` | array | Subagent cards in the matched set, flattened with model + protocols. |
-| `validators` | `{ protocol, card }` | Protocol validators (auto-applied per emit/consume) + card validators (methodology-specific). |
-| `tools` | array | Verbs declared by installed tools whose `accepts:` matches one of `emits:`. |
+| `subagents` | string[] | Paths to CORE.md files of subagents the matched methodology dispatches. Agent reads each subagent's CORE.md to learn its model / consumes / emits — the manifest does not duplicate that metadata. |
+| `validators.protocol` | string[] | Paths to protocol validators that auto-apply for any artifact emitting/consuming the protocols in `emits`/`consumes`. |
+| `validators.card` | string[] | Paths to card-level methodology validator scripts. |
+| `tools` | object keyed by verb | `<verb-name>: <path-to-plugin.json>`. Each entry is a verb declared by an installed tool plugin whose `accepts:` matches one of `emits[]`. |
 | `emits` / `consumes` | string[] | Union of protocol names across the matched set. |
 | `warnings` | string[] | Non-fatal composition warnings. |
 
@@ -344,12 +350,14 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
 
 ### How the agent reads it
 
-1. Load `core[]` files immediately (the methodology body).
-2. For each entry in `filled{}`: load its `core` immediately. Decide per-task which `references` to pull.
-3. Dispatch each subagent in `subagents[]` with its model + the relevant input.
-4. Pipe each emitted artifact through `validators.protocol[]` matching the emit's protocol, then `validators.card[]` for the same module. All exit 0 → pass.
-5. Stamp `validated_by: <hash>` on the artifact. Match `emits[]` against `tools[].accepts`; invoke the matching plugin's verb with the signed payload.
-6. Read `warnings[]` first; decide whether to proceed partial or abort.
+1. Resolve every path with `root + "/" + <path>`.
+2. Load `core[]` files immediately (the methodology body — orchestration of subagents lives here).
+3. For each entry in `filled{}`: load `core` immediately. Decide per-task which `references` to pull.
+4. The methodology's CORE.md tells the agent **how** to dispatch each subagent in `subagents[]` (order, parallel vs sequential, what input to pass). The manifest just lists which subagent files to consult; tagen does not encode orchestration.
+5. Dispatch a subagent by reading its CORE.md (which has its `model:` + `consumes` + `emits` in frontmatter) and invoking it with the right input.
+6. Pipe each emitted artifact through `validators.protocol[]` matching the emit, then `validators.card[]` for the same module. All exit 0 → pass.
+7. Stamp `validated_by: <hash>` on the artifact. Match `emits[]` against the keys of `tools{}`; invoke the matching plugin's verb with the signed payload.
+8. Read `warnings[]` first; decide whether to proceed partial or abort.
 
 ---
 
@@ -385,6 +393,8 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
 | `requires:` value not a known type (no matching `brain/<value>/` dir) | `<card>: unknown type in requires: <value>` |
 | `emits:` value not a known protocol (no matching `brain/protocol/<value>/`) | `<card>: unknown protocol in emits: <value>` |
 | `consumes:` value not a known protocol | `<card>: unknown protocol in consumes: <value>` |
+| `subagents:` value not a known subagent (no `brain/subagent/<value>/CORE.md`) | `<card>: unknown subagent in subagents: <value>` |
+| `subagents:` declared on a card outside `brain/review/` or `brain/methodology/` | `<card>: subagents allowed only on review and methodology cards` |
 | Tool plugin verb's `accepts:`/`emits:` not a known protocol | `<plugin>: unknown protocol in verbs.<verb>.<field>: <value>` |
 
 ### Alias rules
@@ -443,17 +453,18 @@ export interface CardFrontmatter {
   requires?: CardType[];
   emits?: string[];
   consumes?: string[];
+  subagents?: string[];                  // review/methodology only
   model?: "haiku" | "sonnet" | "opus";   // subagent only
 }
 
 export interface Card {
   id: CardId;
-  dirPath: string;                  // brain/<type>/<name>/
-  corePath: string;                 // brain/<type>/<name>/CORE.md
+  dirPath: string;                  // <root>/brain/<type>/<name>/
+  corePath: string;                 // <root>/brain/<type>/<name>/CORE.md
   frontmatter: CardFrontmatter;
   body: string;
-  references: string[];             // brain/<type>/<name>/references/*.md
-  validators: string[];             // brain/<type>/<name>/validators/*.ts (review/methodology only)
+  references: string[];             // brain/<type>/<name>/references/*.md (root-relative)
+  validators: string[];             // brain/<type>/<name>/validators/*.ts (root-relative)
 }
 
 export interface Protocol extends Card {
@@ -463,52 +474,28 @@ export interface Protocol extends Card {
   invalidExamples: string[];
 }
 
-export interface ToolVerb {
-  plugin: string;                   // tools/<plugin>/
-  verb: string;
-  accepts?: string;                 // protocol name
-  emits?: string;                   // protocol name
-}
-
 export interface ResolvedSlot {
   type: CardType;
   fillerCard: string;               // chosen card's name
   candidates: string[];             // all candidates' names (alphabetical)
 }
 
-export interface ResolvedSubagent {
-  name: string;
-  model: "haiku" | "sonnet" | "opus";
-  core: string;
-  consumes: string[];
-  emits: string[];
-}
-
-export interface ResolvedReference {
-  module: string;                   // "<type>/<name>"
-  path: string;
-}
-
-export interface ResolvedValidator {
-  path: string;
-  protocol?: string;                // for protocol-level validators
-  module?: string;                  // for card-level validators ("<type>/<name>")
-}
-
 export interface FilledSlot {
-  core: string;
-  references: string[];
+  core: string;                     // root-relative
+  references: string[];             // root-relative
 }
 
 export interface Manifest {
+  /** Absolute path of the marketplace dir. All other paths in the manifest are relative to this. */
+  root: string;
   modules: Array<CardId & { core: string }>;
-  core: string[];
-  references: ResolvedReference[];
+  core: string[];                                // root-relative
+  references: string[];                          // root-relative
   filled: Record<CardType, FilledSlot>;
   slots: ResolvedSlot[];
-  subagents: ResolvedSubagent[];
-  validators: { protocol: ResolvedValidator[]; card: ResolvedValidator[] };
-  tools: ToolVerb[];
+  subagents: string[];                           // paths to brain/subagent/<name>/CORE.md (root-relative)
+  validators: { protocol: string[]; card: string[] };  // root-relative paths
+  tools: Record<string, string>;                 // verb-name -> path to plugin.json (root-relative)
   emits: string[];
   consumes: string[];
   warnings: string[];
@@ -600,7 +587,8 @@ bun add -D @questi0nm4rk/tagen          # devDep, invoke via `bunx tagen`
 ### First-run sanity
 
 ```bash
-tagen tags          # prints types and names from the discovered brain/ tree
+tagen list          # prints every <type>/<name> in the discovered brain/ tree
+tagen list --aliases # same, with each card's aliases
 tagen validate      # exit 0 on a clean tree
 ```
 
@@ -620,7 +608,7 @@ One job, fast on a 60-card catalog. Non-zero exit blocks merge.
 4. (Methodology / review) Add `validators/<rule>.ts` if needed.
 5. (Protocol) Add `schema.json`, `validator.ts`, `examples/valid/*.json`, `examples/invalid/*.json`.
 6. `tagen validate` — fix violations.
-7. `tagen demo --type <T> --name <N>` (or `tagen get <fuzzy-match>`) — verify composition.
+7. `tagen get --type <T> --name <N>` (or `tagen get <fuzzy-match>`) — verify composition.
 8. Commit.
 
 ### Agent workflow (typical task)
@@ -638,7 +626,7 @@ One job, fast on a 60-card catalog. Non-zero exit blocks merge.
 - `tagen validate --verbose` — per-card per-rule trace.
 - `tagen get ... --dry-run` — manifest to stdout, no schema check on referenced protocols.
 - `tagen list --type <T>` — browse one type.
-- `tagen tags` — print all types and names.
+- `tagen list --aliases` — include each card's aliases beside its canonical name.
 
 ### Error reporting
 
