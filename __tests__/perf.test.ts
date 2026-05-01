@@ -142,7 +142,6 @@ describe(`perf — ${CARD_COUNT}-card fixture`, () => {
         { domain: ["code-review"] },
         {
           json: true,
-          dryRun: false,
         }
       )
     );

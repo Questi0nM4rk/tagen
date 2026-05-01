@@ -22,11 +22,9 @@ npm install -g @questi0nm4rk/tagen
 
 | Command | Example | Description |
 |---------|---------|-------------|
-| `tags` | `tagen tags` | Print controlled vocabulary |
 | `validate` | `tagen validate` | Check all cards, protocols, and subagents against vocabulary |
 | `list` | `tagen list` | List all catalog cards |
 | `list` | `tagen list --filter language=python` | Filter by tag |
-| `demo` | `tagen demo --language dotnet` | Preview a composition (matched cards + slot fills + warnings) |
 | `get` | `tagen get --language dotnet --json` | Resolve a composition into a JSON manifest |
 | `add` | `tagen add` | Scaffold a new catalog card interactively |
 

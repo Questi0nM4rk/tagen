@@ -3,8 +3,6 @@ import type { CatalogCard, ProtocolEntry, Subagent } from "../lib/types";
 
 export interface GetOptions {
   json: boolean;
-  /** Reserved for the future protocol-schema check; no-op today. */
-  dryRun: boolean;
 }
 
 /**

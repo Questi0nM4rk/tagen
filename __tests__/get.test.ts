@@ -23,7 +23,7 @@ describe("runGet — --json emits a manifest to stdout, warnings to stderr", () 
         protocols,
         FIXTURES,
         { domain: ["code-review"], language: "dotnet" },
-        { json: true, dryRun: false }
+        { json: true }
       )
     );
     const m = JSON.parse(stdout) as Manifest;
@@ -54,7 +54,7 @@ describe("runGet — --json emits a manifest to stdout, warnings to stderr", () 
         protocols,
         FIXTURES,
         { cards: ["strict-review"] },
-        { json: true, dryRun: false }
+        { json: true }
       )
     );
     expect(stderr).toContain("language-patterns");
@@ -77,7 +77,7 @@ describe("runGet — slot-filler content routes to refs[] not core[]", () => {
         protocols,
         FIXTURES,
         { domain: ["code-review"], language: "dotnet" },
-        { json: true, dryRun: false }
+        { json: true }
       )
     );
     const m = JSON.parse(stdout) as Manifest;
@@ -96,7 +96,7 @@ describe("runGet — slot-filler content routes to refs[] not core[]", () => {
         protocols,
         FIXTURES,
         { domain: ["code-review"], language: "dotnet" },
-        { json: true, dryRun: false }
+        { json: true }
       )
     );
     const m = JSON.parse(stdout) as Manifest;
@@ -118,7 +118,7 @@ describe("runGet — text mode (no --json)", () => {
         protocols,
         FIXTURES,
         { domain: ["code-review"], language: "dotnet" },
-        { json: false, dryRun: false }
+        { json: false }
       )
     );
     expect(stdout).toContain("Composition for query");
