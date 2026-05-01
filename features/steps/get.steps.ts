@@ -1,8 +1,9 @@
 import { expect } from "bun:test";
-import { rm } from "node:fs/promises";
-import { After, Before, Then, When } from "@questi0nm4rk/feats";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { After, Before, Given, Then, When } from "@questi0nm4rk/feats";
 import type { TaGenWorld } from "./shared.ts";
-import { runTagen } from "./shared.ts";
+import { createProjectDir, resetSkills, runTagen } from "./shared.ts";
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -19,10 +20,83 @@ After(async (world: TaGenWorld) => {
 });
 
 // ─── Given ───────────────────────────────────────────────────────────────────
-// Reuse "a skill-graph with v2 cards that satisfy all requires" and
-// "a skill-graph with a card whose requires are not satisfied" from demo.steps.ts,
-// and "a skill-graph with catalog cards" from list.steps.ts.
+// "a skill-graph with catalog cards" lives in list.steps.ts.
 // @questi0nm4rk/feats shares step registrations globally within the runner.
+
+const STRICT_REVIEW_CARD = `---
+skill: strict-review
+description: "Zero-tolerance PR/MR review."
+tags:
+  phase: [review]
+  domain: [code-review]
+  language: agnostic
+  layer: methodology
+  concerns: [review-automation]
+provides: [review-methodology]
+requires: [language-patterns]
+emits: []
+consumes: []
+surface:
+  triggers: []
+core:
+  files: []
+deep:
+  subagents: []
+  slots:
+    language-patterns: true
+  validators: []
+---
+
+# Strict Review
+`;
+
+const CSHARP_PATTERNS_CARD = `---
+skill: csharp-patterns
+description: "C#/.NET language-specific review patterns."
+tags:
+  phase: [review]
+  domain: [code-review]
+  language: dotnet
+  layer: reference
+  concerns: [review-automation]
+provides: [language-patterns]
+requires: []
+emits: []
+consumes: []
+surface:
+  triggers: []
+core:
+  files: []
+deep:
+  subagents: []
+  slots: {}
+  validators: []
+---
+
+# C# Patterns
+`;
+
+Given<TaGenWorld>(
+  "a skill-graph with v2 cards that satisfy all requires",
+  async (world: TaGenWorld) => {
+    world.projectDir = await createProjectDir();
+    const skillsDir = join(world.projectDir, "skill-graph", "skills");
+    await Promise.all([
+      writeFile(join(skillsDir, "strict-review.md"), STRICT_REVIEW_CARD, "utf-8"),
+      writeFile(join(skillsDir, "csharp-patterns.md"), CSHARP_PATTERNS_CARD, "utf-8"),
+    ]);
+  }
+);
+
+Given<TaGenWorld>(
+  "a skill-graph with a card whose requires are not satisfied",
+  async (world: TaGenWorld) => {
+    world.projectDir = await createProjectDir();
+    await resetSkills(world.projectDir);
+    const skillsDir = join(world.projectDir, "skill-graph", "skills");
+    await writeFile(join(skillsDir, "strict-review.md"), STRICT_REVIEW_CARD, "utf-8");
+  }
+);
 
 // ─── When ─────────────────────────────────────────────────────────────────────
 
@@ -143,4 +217,12 @@ Then<TaGenWorld>("manifest.slots is non-empty", (world: TaGenWorld) => {
   };
   expect(Array.isArray(manifest.slots)).toBe(true);
   expect((manifest.slots ?? []).length).toBeGreaterThan(0);
+});
+
+Then<TaGenWorld>("it exits 2", (world: TaGenWorld) => {
+  expect(world.result?.exitCode).toBe(2);
+});
+
+Then<TaGenWorld>('it prints "No cards matched" to stderr', (world: TaGenWorld) => {
+  expect(world.result?.stderr ?? "").toContain("No cards matched");
 });
