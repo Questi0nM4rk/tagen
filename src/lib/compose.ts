@@ -1,281 +1,260 @@
-import { join, relative } from "node:path";
-import { filterCards } from "./catalog";
-import type { CatalogCard, ProtocolEntry, Subagent } from "./types";
+import { rel } from "./catalog.ts";
+import { type FuzzyEntry, fuzzyMatch, MIN_QUERY_LENGTH } from "./fuzzy.ts";
+import {
+  type Card,
+  type CardId,
+  type CardType,
+  cardKey,
+  type FilledSlot,
+  type Manifest,
+  type ResolvedSlot,
+  SUBAGENT_HOST_TYPES,
+} from "./types.ts";
 
-/**
- * Tag query for `tagen list` / `demo` / `get`. All array fields are repeatable;
- * `language` is single-valued and matched inclusively (matches its value OR
- * `agnostic`). `cards` is an override — when non-empty it bypasses every other
- * filter and restricts the matched set to exactly those skill names.
- */
 export interface ComposeQuery {
-  phase?: string[];
-  domain?: string[];
-  language?: string;
-  layer?: string[];
-  concerns?: string[];
-  capability?: string[];
-  protocol?: string[];
-  cards?: string[];
+  /** Free-form positional args fuzzy-matched to cards. */
+  positional: string[];
+  /** Explicit (type, name) selections, paired and repeatable. */
+  explicit: CardId[];
+  /** `--pin <type>=<name>` overrides for slot filling. */
+  pins: Map<CardType, string>;
 }
 
-export interface ResolvedSlot {
-  capability: string;
-  fillerCard: string;
-  candidates: string[];
+export interface ComposeOutcome {
+  manifest?: Manifest;
+  /** Errors that prevent producing a manifest (ambiguous fuzzy match, etc.). */
+  errors: string[];
+  /** Browse intent triggered: a positional arg matched a type dir name. */
+  browseTypes: CardType[];
+  /** Composition was attempted but no cards matched (exit-2 case). */
+  emptyMatch: boolean;
 }
 
-export interface Composition {
-  cards: CatalogCard[];
-  slots: ResolvedSlot[];
-  warnings: string[];
+export function emptyQuery(): ComposeQuery {
+  return { positional: [], explicit: [], pins: new Map() };
 }
 
 /**
- * Compose a manifest from a tag query.
+ * Resolve a query into a manifest per SPEC-tagen "Resolution algorithm".
  *
- * Initial set: cards matching the tag query (or `--card` overrides).
- * Slot resolution: for every `requires:` capability on each card, and every
- *   `references:` capability on each subagent listed by `deep.subagents`,
- *   find providers in the matched set. Pick the first provider by alphabetical
- *   card name. Warn when N>1 candidates exist; warn when no provider exists.
+ * `cards` is the full catalog. `root` is the marketplace dir (parent of brain/).
+ * `knownTypes` is every dir name under brain/ — used both for slot validation
+ * and for browse-intent detection on bare type-name positional args.
  */
-/**
- * Filter cards by a ComposeQuery. Returns the matched set sorted by skill.
- * `cards` override (when present) bypasses every other filter; otherwise
- * tag dimensions AND together, capability/protocol filters intersect last.
- * Shared by `compose()` and `tagen list`.
- */
-export function filterByQuery(cards: CatalogCard[], q: ComposeQuery): CatalogCard[] {
-  let matched: CatalogCard[];
-  if (q.cards?.length) {
-    const wanted = new Set(q.cards);
-    matched = cards.filter((c) => wanted.has(c.skill));
-  } else {
-    const filters: Record<string, string[]> = {};
-    if (q.phase?.length) filters["phase"] = q.phase;
-    if (q.domain?.length) filters["domain"] = q.domain;
-    if (q.language) filters["language"] = [q.language];
-    if (q.layer?.length) filters["layer"] = q.layer;
-    if (q.concerns?.length) filters["concerns"] = q.concerns;
-    matched = filterCards(cards, filters);
-
-    if (q.capability?.length) {
-      const caps = new Set(q.capability);
-      matched = matched.filter((c) => c.provides.some((p) => caps.has(p)));
-    }
-    if (q.protocol?.length) {
-      const protos = new Set(q.protocol);
-      matched = matched.filter(
-        (c) =>
-          c.emits.some((p) => protos.has(p)) || c.consumes.some((p) => protos.has(p))
-      );
-    }
-  }
-  return [...matched].sort((a, b) => a.skill.localeCompare(b.skill));
-}
-
 export function compose(
-  cards: CatalogCard[],
-  subagents: Subagent[],
-  q: ComposeQuery
-): Composition {
-  const matched = filterByQuery(cards, q);
-
-  const slots: ResolvedSlot[] = [];
+  cards: Card[],
+  root: string,
+  query: ComposeQuery,
+  knownTypes: Set<CardType>
+): ComposeOutcome {
+  const errors: string[] = [];
   const warnings: string[] = [];
-  const seen = new Set<string>();
+  const browseTypes: CardType[] = [];
 
-  const resolveSlot = (capability: string, requesterLabel: string): void => {
-    if (seen.has(capability)) return;
-    seen.add(capability);
-    const providers = matched.filter((c) => c.provides.includes(capability));
-    if (providers.length === 0) {
-      warnings.push(
-        `unfilled slot: ${requesterLabel} requires '${capability}' but no card in the matched set provides it`
-      );
-      return;
+  const index = new Map<string, Card>();
+  for (const c of cards) index.set(cardKey(c.id), c);
+
+  buildAliasIndex(cards, errors);
+
+  const matched = new Map<string, Card>();
+
+  for (const id of query.explicit) {
+    const card = index.get(cardKey(id));
+    if (!card) {
+      errors.push(`unknown card: ${id.type}/${id.name}`);
+      continue;
     }
+    matched.set(cardKey(id), card);
+  }
+
+  const fuzzyEntries = buildFuzzyEntries(cards);
+  for (const arg of query.positional) {
+    if (knownTypes.has(arg)) {
+      browseTypes.push(arg);
+      continue;
+    }
+    if (arg.length < MIN_QUERY_LENGTH) {
+      errors.push(`arg '${arg}' shorter than minimum ${MIN_QUERY_LENGTH} characters`);
+      continue;
+    }
+    const candidates = fuzzyMatch(fuzzyEntries, arg);
+    if (candidates.length === 0) {
+      errors.push(`no card matches arg: ${arg}`);
+      continue;
+    }
+    if (candidates.length > 1) {
+      const list = candidates
+        .map((c) => cardKey(c.id))
+        .sort()
+        .join(", ");
+      errors.push(`ambiguous arg '${arg}': matches ${list}. Use --type/--name.`);
+      continue;
+    }
+    const onlyCandidate = candidates[0];
+    if (!onlyCandidate) continue;
+    const card = index.get(cardKey(onlyCandidate.id));
+    if (card) matched.set(cardKey(card.id), card);
+  }
+
+  if (errors.length > 0) {
+    return { errors, browseTypes, emptyMatch: false };
+  }
+
+  if (matched.size === 0 && browseTypes.length === 0) {
+    return { errors: [], browseTypes, emptyMatch: true };
+  }
+
+  if (matched.size === 0 && browseTypes.length > 0) {
+    return { errors: [], browseTypes, emptyMatch: false };
+  }
+
+  const matchedSorted = [...matched.values()].sort(byTypeName);
+
+  const requiredTypes = collectRequires(matchedSorted);
+  const slots: ResolvedSlot[] = [];
+  const filled: Record<CardType, FilledSlot> = {};
+  const fillerKeys = new Set<string>();
+
+  for (const reqType of requiredTypes) {
+    const candidates = matchedSorted
+      .filter((c) => c.id.type === reqType)
+      .sort(byTypeName);
+    const candidateNames = candidates.map((c) => c.id.name);
+
+    let chosen: Card | undefined;
+    const pin = query.pins.get(reqType);
+    if (pin) {
+      chosen = candidates.find((c) => c.id.name === pin);
+      if (!chosen) {
+        warnings.push(
+          `--pin ${reqType}=${pin} did not match any candidate (have: ${candidateNames.join(", ") || "none"})`
+        );
+      }
+    }
+    if (!chosen) chosen = candidates[0];
+
+    if (!chosen) {
+      warnings.push(`unfilled slot for type ${reqType}`);
+      slots.push({ type: reqType, fillerCard: "", candidates: candidateNames });
+      continue;
+    }
+
+    if (candidates.length > 1) {
+      warnings.push(
+        `multiple candidates for type ${reqType}: ${candidateNames.join(", ")}. Picked ${chosen.id.name}. Use --pin ${reqType}=<name> to override.`
+      );
+    }
+
     slots.push({
-      capability,
-      fillerCard: providers[0]!.skill,
-      candidates: providers.map((p) => p.skill),
+      type: reqType,
+      fillerCard: chosen.id.name,
+      candidates: candidateNames,
     });
-    if (providers.length > 1) {
-      warnings.push(
-        `multiple providers for '${capability}' (${requesterLabel}): [${providers.map((p) => p.skill).join(", ")}]. Picked '${providers[0]!.skill}' (alphabetical first). Use --card to override.`
-      );
-    }
+    filled[reqType] = {
+      core: rel(chosen.corePath, root),
+      references: chosen.references,
+    };
+    fillerKeys.add(cardKey(chosen.id));
+  }
+
+  const subagents = resolveSubagents(matchedSorted, index, root, warnings);
+  const validators = matchedSorted
+    .filter((c) => c.id.type === "review" || c.id.type === "methodology")
+    .flatMap((c) => c.validators);
+
+  const nonFillers = matchedSorted.filter((c) => !fillerKeys.has(cardKey(c.id)));
+
+  const manifest: Manifest = {
+    root,
+    modules: matchedSorted.map((c) => ({
+      type: c.id.type,
+      name: c.id.name,
+      core: rel(c.corePath, root),
+    })),
+    core: nonFillers.map((c) => rel(c.corePath, root)),
+    references: nonFillers.flatMap((c) => c.references),
+    filled,
+    slots,
+    subagents,
+    validators,
+    warnings,
   };
 
-  for (const card of matched) {
-    for (const req of card.requires) {
-      resolveSlot(req, `card '${card.skill}'`);
-    }
-  }
-  for (const card of matched) {
-    for (const sName of card.deep.subagents) {
-      const sub = subagents.find((s) => s.name === sName);
-      if (!sub) {
-        warnings.push(
-          `subagent '${sName}' referenced by '${card.skill}' not found in skill-graph/subagents/`
+  return { manifest, errors: [], browseTypes, emptyMatch: false };
+}
+
+function buildAliasIndex(cards: Card[], errors: string[]): Map<string, CardId> {
+  const aliases = new Map<string, CardId>();
+  const cardsByName = new Map<string, CardId>();
+  for (const c of cards) cardsByName.set(c.id.name, c.id);
+
+  for (const c of cards) {
+    for (const alias of c.frontmatter.aliases ?? []) {
+      const collidingCanonical = cardsByName.get(alias);
+      if (collidingCanonical) {
+        errors.push(
+          `alias '${alias}' on ${cardKey(c.id)} collides with canonical name ${cardKey(collidingCanonical)}`
+        );
+      }
+      const existing = aliases.get(alias);
+      if (existing) {
+        errors.push(
+          `alias '${alias}' collides between ${cardKey(existing)} and ${cardKey(c.id)}`
         );
         continue;
       }
-      for (const ref of sub.references) {
-        resolveSlot(ref, `subagent '${sName}'`);
+      aliases.set(alias, c.id);
+    }
+  }
+  return aliases;
+}
+
+function buildFuzzyEntries(cards: Card[]): FuzzyEntry[] {
+  return cards.map((c) => ({
+    id: c.id,
+    haystacks: [
+      c.id.name.toLowerCase(),
+      ...(c.frontmatter.aliases ?? []).map((a) => a.toLowerCase()),
+    ],
+  }));
+}
+
+function collectRequires(cards: Card[]): CardType[] {
+  const seen = new Set<CardType>();
+  for (const c of cards) {
+    for (const r of c.frontmatter.requires ?? []) seen.add(r);
+  }
+  return [...seen].sort();
+}
+
+function resolveSubagents(
+  cards: Card[],
+  index: Map<string, Card>,
+  root: string,
+  warnings: string[]
+): string[] {
+  const out = new Set<string>();
+  for (const c of cards) {
+    if (!SUBAGENT_HOST_TYPES.has(c.id.type)) continue;
+    for (const name of c.frontmatter.subagents ?? []) {
+      const sub = index.get(cardKey({ type: "subagent", name }));
+      if (!sub) {
+        warnings.push(`unknown subagent: ${name} referenced by ${cardKey(c.id)}`);
+        continue;
       }
+      out.add(rel(sub.corePath, root));
     }
   }
-
-  return { cards: matched, slots, warnings };
+  return [...out].sort();
 }
 
-export interface ResolvedSubagent {
-  name: string;
-  model: string;
-  prompt: string; // repo-relative path
-  description: string;
-  consumes: string[];
-  emits: string[];
-  references: string[];
+function byTypeName(a: Card, b: Card): number {
+  if (a.id.type !== b.id.type) return a.id.type < b.id.type ? -1 : 1;
+  return a.id.name < b.id.name ? -1 : a.id.name > b.id.name ? 1 : 0;
 }
 
-export interface ResolvedRef {
-  path: string; // repo-relative
-  slot: string | null;
-}
-
-export interface ResolvedValidator {
-  protocol?: string;
-  module?: string;
-  path: string; // repo-relative
-}
-
-export interface Manifest {
-  modules: string[];
-  core: string[];
-  subagents: ResolvedSubagent[];
-  refs: ResolvedRef[];
-  validators: { protocol: ResolvedValidator[]; card: ResolvedValidator[] };
-  emits: string[];
-  consumes: string[];
-  warnings: string[];
-  slots: ResolvedSlot[];
-}
-
-function rel(repoRoot: string, absPath: string): string {
-  return relative(repoRoot, absPath);
-}
-
-/**
- * Build a JSON manifest from a composition per SPEC-004.
- *
- * Output shape: { modules, core, subagents, refs, validators:{protocol,card},
- *   emits, consumes, warnings, slots }. All paths repo-relative.
- */
-export function buildManifest(
-  comp: Composition,
-  subagents: Subagent[],
-  protocols: ProtocolEntry[],
-  repoRoot: string
-): Manifest {
-  // Aggregate emits/consumes across matched cards.
-  const allEmits = new Set<string>();
-  const allConsumes = new Set<string>();
-  for (const c of comp.cards) {
-    for (const p of c.emits) allEmits.add(p);
-    for (const p of c.consumes) allConsumes.add(p);
-  }
-
-  // modules — skill names only.
-  const modules = comp.cards.map((c) => c.skill);
-
-  // subagents — deduped across cards; prompt is repo-relative.
-  const subRefs: ResolvedSubagent[] = [];
-  const seenSubs = new Set<string>();
-  for (const c of comp.cards) {
-    for (const sName of c.deep.subagents) {
-      if (seenSubs.has(sName)) continue;
-      seenSubs.add(sName);
-      const sub = subagents.find((s) => s.name === sName);
-      if (!sub) continue;
-      subRefs.push({
-        name: sub.name,
-        model: sub.model,
-        prompt: rel(repoRoot, sub.filePath),
-        description: sub.description,
-        consumes: sub.consumes,
-        emits: sub.emits,
-        references: sub.references,
-      });
-    }
-  }
-
-  // Route content per SPEC-tagen "Composition resolution algorithm" step 9.
-  // Build cardSkill → fillerSlots[] from comp.slots; each matched card C goes
-  // to exactly one bucket: non-filler → manifest.core[] (for core.files) and
-  // manifest.refs[] with slot:null (for deep.refs); filler → all of C's
-  // core.files ∪ deep.refs become refs[] entries tagged with each slot
-  // capability C fills (one entry per (path, slot) pair).
-  const fillerSlotsByCard = new Map<string, string[]>();
-  for (const slot of comp.slots) {
-    const list = fillerSlotsByCard.get(slot.fillerCard) ?? [];
-    list.push(slot.capability);
-    fillerSlotsByCard.set(slot.fillerCard, list);
-  }
-
-  const core: string[] = [];
-  const refs: ResolvedRef[] = [];
-  for (const c of comp.cards) {
-    const brainPath = join(repoRoot, "brain", c.skill);
-    const fillerSlots = fillerSlotsByCard.get(c.skill);
-    if (!fillerSlots || fillerSlots.length === 0) {
-      for (const f of c.core.files) core.push(rel(repoRoot, join(brainPath, f)));
-      for (const r of c.deep.refs) {
-        refs.push({ path: rel(repoRoot, join(brainPath, r)), slot: null });
-      }
-      continue;
-    }
-    const allPaths = [...c.core.files, ...c.deep.refs];
-    for (const p of allPaths) {
-      const repoRel = rel(repoRoot, join(brainPath, p));
-      for (const cap of fillerSlots) {
-        refs.push({ path: repoRel, slot: cap });
-      }
-    }
-  }
-
-  // validators.protocol — auto-derived from emits/consumes; only include
-  // protocols that actually have a validator.ts on disk.
-  const protocolValidators: ResolvedValidator[] = protocols
-    .filter((p) => (allEmits.has(p.name) || allConsumes.has(p.name)) && p.hasValidator)
-    .map((p) => ({
-      protocol: p.name,
-      path: rel(repoRoot, join(p.dirPath, "validator.ts")),
-    }));
-
-  // validators.card — union of every matched card's deep.validators.
-  const cardValidators: ResolvedValidator[] = [];
-  for (const c of comp.cards) {
-    const brainPath = join(repoRoot, "brain", c.skill);
-    for (const v of c.deep.validators) {
-      cardValidators.push({
-        module: c.skill,
-        path: rel(repoRoot, join(brainPath, v)),
-      });
-    }
-  }
-
-  return {
-    modules,
-    core,
-    subagents: subRefs,
-    refs,
-    validators: { protocol: protocolValidators, card: cardValidators },
-    emits: [...allEmits].sort(),
-    consumes: [...allConsumes].sort(),
-    warnings: comp.warnings,
-    slots: comp.slots,
-  };
+export function knownTypesFromCards(cards: Card[]): Set<CardType> {
+  const out = new Set<CardType>();
+  for (const c of cards) out.add(c.id.type);
+  return out;
 }

@@ -1,0 +1,5 @@
+{
+  "file": "src/auth.ts",
+  "line": 42,
+  "message": "session token logged at INFO level"
+}
