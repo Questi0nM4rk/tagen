@@ -12,10 +12,8 @@ Spec: `docs/specs/SPEC-tagen.md`. Manifest contract: `docs/tagen-get-manifest.sc
 
 | Command | Description |
 |---------|-------------|
-| `tagen tags` | Print controlled vocabulary (tags + capabilities + protocols + subagents) |
 | `tagen validate` | Validate all cards, protocols, and subagents; non-zero exit on any error |
 | `tagen list` | List catalog cards; `--filter key=value` for tag filtering |
-| `tagen demo` | Preview a composition (matched cards + slot fills + warnings) |
 | `tagen get` | Resolve a composition into a JSON manifest (`--json`) |
 | `tagen add` | Scaffold a new catalog card interactively |
 
@@ -61,10 +59,8 @@ src/
 ├── main.ts                 # CLI entrypoint, arg parsing, command dispatch
 ├── commands/
 │   ├── add.ts              # tagen add (interactive scaffold; only writer)
-│   ├── demo.ts             # tagen demo
 │   ├── get.ts              # tagen get
 │   ├── list.ts             # tagen list
-│   ├── tags.ts             # tagen tags
 │   └── validate.ts         # tagen validate
 ├── lib/
 │   ├── types.ts            # CatalogCard, Subagent, Manifest, Vocabulary, …
@@ -112,10 +108,8 @@ Tests use `__tests__/fixtures/skill-graph/` as the vault root — no real market
 
 ```
 features/
-├── tags.feature
 ├── validate.feature
 ├── list.feature
-├── demo.feature
 ├── get.feature
 └── add.feature
 ```
@@ -169,7 +163,7 @@ Reviews (including `/simplify`) enforce the same rules. Flag and fix:
 ## Key Design Decisions
 
 ### Language filter — inclusive
-`tagen list/demo/get --language python` matches `python` OR `agnostic`.
+`tagen list/get --language python` matches `python` OR `agnostic`.
 Single-string field; two specific languages → split into two cards.
 
 ### Convention over configuration

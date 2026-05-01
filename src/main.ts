@@ -1,10 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runAdd } from "./commands/add";
-import { runDemo } from "./commands/demo";
 import { runGet } from "./commands/get";
 import { runList, runListSubagents } from "./commands/list";
-import { runTags } from "./commands/tags";
 import { runValidate } from "./commands/validate";
 import {
   allCapabilities,
@@ -28,14 +26,12 @@ const USAGE = `tagen — skill graph CLI for qsm-marketplace
 Usage: tagen <command> [options]
 
 Commands:
-  tags       Show controlled vocabulary
   validate   Check consistency of all catalog cards, protocols, and subagents
   list       List catalog cards (or subagents with --subagents)
-  demo       Preview a composition (matched cards + slot fills + warnings)
   get        Resolve a composition into a JSON manifest (--json)
   add        Scaffold a new catalog card interactively
 
-Options (list / demo / get):
+Options (list / get):
   --phase X        Filter by phase (repeatable, OR)
   --domain X       Filter by domain (repeatable, OR)
   --language X     Filter by language (single; matches X OR 'agnostic')
@@ -48,15 +44,9 @@ Options (list / demo / get):
 list-only:
   --subagents      List subagents instead of catalog cards
 
-demo / get:
+get:
   --card NAME      Restrict matched set to listed cards (repeatable, bypasses
                    tag filters; used to override slot resolution)
-
-demo:
-  --verbose        Print resolution trace
-
-get:
-  --dry-run        Skip downstream protocol-schema check (no-op today)
 
 validate:
   --verbose        Print per-card per-rule trace
@@ -68,9 +58,6 @@ Examples:
   tagen list
   tagen list --domain code-review --language dotnet
   tagen list --subagents
-  tagen tags --json
-  tagen demo --domain code-review --language dotnet
-  tagen demo --card strict-review --card csharp-patterns
   tagen get --domain code-review --language dotnet --json
   tagen validate --verbose
 `;
@@ -163,7 +150,7 @@ function validateComposeQuery(
   }
 }
 
-const KNOWN_COMMANDS = new Set(["tags", "validate", "list", "demo", "get", "add"]);
+const KNOWN_COMMANDS = new Set(["validate", "list", "get", "add"]);
 
 /**
  * Read the bundled package.json's version field. Resolves relative to this
@@ -204,14 +191,6 @@ async function main(): Promise<void> {
   const vaultDir = findVaultDir();
 
   switch (command) {
-    case "tags": {
-      const vocab = loadVocabulary(vaultDir);
-      const capabilities = loadCapabilities(vaultDir);
-      const protocols = loadProtocols(vaultDir);
-      const subagents = loadSubagents(vaultDir);
-      runTags(vocab, capabilities, protocols, subagents, json);
-      break;
-    }
     case "list": {
       const vocab = loadVocabulary(vaultDir);
       const capabilities = loadCapabilities(vaultDir);
@@ -249,17 +228,6 @@ async function main(): Promise<void> {
       await runAdd(cards, vocab, vaultDir);
       break;
     }
-    case "demo": {
-      const vocab = loadVocabulary(vaultDir);
-      const capabilities = loadCapabilities(vaultDir);
-      const cards = loadAllCards(vaultDir);
-      const subagents = loadSubagents(vaultDir);
-      const protocols = loadProtocols(vaultDir);
-      const q = parseComposeQuery(restArgs);
-      validateComposeQuery(q, vocab, capabilities, protocols);
-      runDemo(cards, subagents, q, { verbose });
-      break;
-    }
     case "get": {
       const vocab = loadVocabulary(vaultDir);
       const capabilities = loadCapabilities(vaultDir);
@@ -269,8 +237,7 @@ async function main(): Promise<void> {
       const root = repoRoot(vaultDir);
       const q = parseComposeQuery(restArgs);
       validateComposeQuery(q, vocab, capabilities, protocols);
-      const dryRun = restArgs.includes("--dry-run");
-      runGet(cards, subagents, protocols, root, q, { json, dryRun });
+      runGet(cards, subagents, protocols, root, q, { json });
       break;
     }
   }
