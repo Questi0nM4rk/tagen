@@ -15,13 +15,32 @@
   ],
   "author": "Questi0nM4rk",
   "license": "MIT",
+  "homepage": "https://github.com/Questi0nM4rk/tagen#readme",
+  "bugs": {
+    "url": "https://github.com/Questi0nM4rk/tagen/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Questi0nM4rk/tagen.git"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "tagen": "bin/tagen.js"
   },
   "exports": {
-    ".": "./bin/tagen.js",
-    "./validator-runtime": "./src/validator-runtime.ts"
+    ".": {
+      "import": "./bin/tagen.js"
+    },
+    "./validator-runtime": {
+      "types": "./src/validator-runtime.ts",
+      "import": "./src/validator-runtime.ts"
+    }
   },
   "files": [
     "bin/tagen.js",
@@ -34,7 +53,10 @@
     "typecheck": "tsgo --noEmit",
     "lint": "biome check src/ __tests__/",
     "lint:fix": "biome check --write src/ __tests__/",
-    "prepublishOnly": "bun run typecheck && bun test && bun run build:npm"
+    "check:doc-counts": "bun scripts/check-doc-counts.ts",
+    "changelog": "git cliff -o CHANGELOG.md",
+    "changelog:unreleased": "git cliff --unreleased --prepend CHANGELOG.md",
+    "prepublishOnly": "bun run typecheck && bun test && bun scripts/check-doc-counts.ts && bun run build:npm"
   },
   "dependencies": {
     "ajv": "^8.20.0",
