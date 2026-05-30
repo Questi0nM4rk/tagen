@@ -1,4 +1,4 @@
-# ai-guardrails:sha256=5e80cb9e5816489f5709b958b11e480e5e5255f3195ede89a81efefba6f5ef30
+# ai-guardrails:sha256=bb9bcd511e3de5d1f0b920e200c768d27e7db90c87b537b248c321517f434c76
 pre-commit:
   commands:
 
@@ -28,12 +28,13 @@ pre-commit:
 
     check-suppress-comments:
       glob: "*.{py,ts,tsx,js,jsx,rs,go,cs,lua,sh,bash,zsh,ksh,c,cpp,cc,h,hpp}"
-      run: ai-guardrails hook suppress-comments {staged_files}
+      run: ai-guardrails check-suppress-comments {staged_files}
       fail_text: "Inline suppression comments require a reason"
       priority: 2
 
     no-commits-to-main:
       run: |
+        git rev-list --count HEAD >/dev/null 2>&1 || exit 0
         branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
         if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
           echo "Direct commits to main are not allowed"

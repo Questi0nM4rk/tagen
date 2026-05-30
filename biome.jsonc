@@ -1,10 +1,22 @@
-// ai-guardrails:sha256=b50e1b6f3831c55e4c173c3caf9ec6843abfcad3a2e38135e472a4c36773be2e
+// ai-guardrails:sha256=f8f804d6e5d251d68b2526874591e6d164ca707337e1df9cf79d0593cfdb1268
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error"
+      },
+      "style": {
+        "useConst": "error",
+        "useTemplate": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noConsole": "warn",
+        "useBiomeIgnoreFolder": "off"
+      }
     }
   },
   "formatter": {
@@ -18,5 +30,6 @@
       "quoteStyle": "double",
       "trailingCommas": "es5"
     }
-  }
+  },
+  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json"
 }
