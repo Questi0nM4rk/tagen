@@ -38,3 +38,12 @@ Feature: tagen get — resolve a composition into a JSON manifest
     Then it exits 0
     And stdout is valid JSON
     And the lang slot is filled by python
+
+  Scenario: subagent uses expands concrete cards before slot filling
+    Given the canonical fixture brain
+    When I run tagen with args get implementer csharp bun-test --json
+    Then it exits 0
+    And stdout is valid JSON
+    And manifest.modules contains a card methodology/tdd
+    And the lang slot is filled by csharp
+    And the test slot is filled by bun-test

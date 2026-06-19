@@ -43,24 +43,46 @@ describe("parseCore — frontmatter", () => {
     expect(r.frontmatter.subagents).toEqual(["security-reviewer"]);
   });
 
-  test("subagent requires model", () => {
+  test("minimal subagent does not require model metadata", () => {
     const r = parseCore(wrap(`description: "ok"`), "subagent");
-    expect(r.errors.some((e) => e.includes("missing required field: model"))).toBe(
+    expect(r.errors).toEqual([]);
+  });
+
+  test("subagent rejects model as harness-specific metadata", () => {
+    const r = parseCore(wrap(`description: "ok"\nmodel: o4-mini`), "subagent");
+    expect(
+      r.errors.some((e) =>
+        e.includes("unknown frontmatter field for type 'subagent': model")
+      )
+    ).toBe(true);
+  });
+
+  test("subagent accepts canonical card IDs in uses", () => {
+    const r = parseCore(
+      wrap(`description: "ok"\nuses: [methodology/tdd, methodology/verification]`),
+      "subagent"
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.frontmatter.uses).toEqual(["methodology/tdd", "methodology/verification"]);
+  });
+
+  test("uses must be an array of strings", () => {
+    const r = parseCore(wrap(`description: "ok"\nuses: methodology/tdd`), "subagent");
+    expect(r.errors.some((e) => e.includes("uses must be an array of strings"))).toBe(
       true
     );
   });
 
-  test("subagent rejects bad model", () => {
-    const r = parseCore(wrap(`description: "ok"\nmodel: o4-mini`), "subagent");
-    expect(r.errors.some((e) => e.includes("unknown model: o4-mini"))).toBe(true);
-  });
-
-  test("subagent accepts haiku/sonnet/opus", () => {
-    for (const m of ["haiku", "sonnet", "opus"]) {
-      const r = parseCore(wrap(`description: "ok"\nmodel: ${m}`), "subagent");
-      expect(r.errors).toEqual([]);
-      expect(r.frontmatter.model).toBe(m as "haiku" | "sonnet" | "opus");
-    }
+  test("non-subagent rejects uses", () => {
+    const r = parseCore(
+      wrap(`description: "ok"\nuses: [methodology/tdd]`),
+      "methodology"
+    );
+    expect(
+      r.errors.some((e) =>
+        e.includes("unknown frontmatter field for type 'methodology': uses")
+      )
+    ).toBe(true);
   });
 
   test("aliases must be array of strings", () => {
@@ -77,20 +99,8 @@ describe("parseCore — frontmatter", () => {
     ).toBe(true);
   });
 
-  test("methodology rejects model field", () => {
-    const r = parseCore(wrap(`description: "ok"\nmodel: opus`), "methodology");
-    expect(
-      r.errors.some((e) =>
-        e.includes("unknown frontmatter field for type 'methodology': model")
-      )
-    ).toBe(true);
-  });
-
   test("subagent rejects subagents field", () => {
-    const r = parseCore(
-      wrap(`description: "ok"\nmodel: opus\nsubagents: [foo]`),
-      "subagent"
-    );
+    const r = parseCore(wrap(`description: "ok"\nsubagents: [foo]`), "subagent");
     expect(
       r.errors.some((e) =>
         e.includes("unknown frontmatter field for type 'subagent': subagents")

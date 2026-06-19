@@ -11,15 +11,13 @@ const COMMON_FIELDS = ["description", "aliases", "requires"] as const;
 const ALLOWED_FIELDS: Record<CardType, readonly string[]> = {
   review: [...COMMON_FIELDS, "subagents"],
   methodology: [...COMMON_FIELDS, "subagents"],
-  subagent: [...COMMON_FIELDS, "model"],
+  subagent: [...COMMON_FIELDS, "uses"],
   lang: COMMON_FIELDS,
   framework: COMMON_FIELDS,
   test: COMMON_FIELDS,
   architecture: COMMON_FIELDS,
   protocol: COMMON_FIELDS,
 };
-
-const VALID_MODELS = new Set(["haiku", "sonnet", "opus"]);
 
 export interface ParseResult {
   frontmatter: CardFrontmatter;
@@ -99,6 +97,17 @@ export function parseCore(source: string, type: CardType): ParseResult {
     }
   }
 
+  if (allowed.has("uses")) {
+    const uses = fm.uses;
+    if (uses !== undefined) {
+      if (!isStringArray(uses)) {
+        errors.push("uses must be an array of strings");
+      } else {
+        out.uses = uses;
+      }
+    }
+  }
+
   if (allowed.has("subagents")) {
     const subagents = fm.subagents;
     if (subagents !== undefined) {
@@ -107,17 +116,6 @@ export function parseCore(source: string, type: CardType): ParseResult {
       } else {
         out.subagents = subagents;
       }
-    }
-  }
-
-  if (allowed.has("model")) {
-    const model = fm.model;
-    if (model === undefined) {
-      errors.push("missing required field: model");
-    } else if (typeof model !== "string" || !VALID_MODELS.has(model)) {
-      errors.push(`unknown model: ${String(model)} (valid: haiku, sonnet, opus)`);
-    } else {
-      out.model = model as "haiku" | "sonnet" | "opus";
     }
   }
 

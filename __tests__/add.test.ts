@@ -18,6 +18,7 @@ describe("scaffoldCard", () => {
       description: "Ruby patterns",
       aliases: [],
       requires: [],
+      uses: [],
       subagents: [],
     });
     const parsed = parseCore(out, "lang");
@@ -34,6 +35,7 @@ describe("scaffoldCard", () => {
       description: "min review",
       aliases: ["m"],
       requires: ["lang"],
+      uses: [],
       subagents: ["security-reviewer"],
     });
     const parsed = parseCore(out, "review");
@@ -41,19 +43,20 @@ describe("scaffoldCard", () => {
     expect(parsed.frontmatter.subagents).toEqual(["security-reviewer"]);
   });
 
-  test("subagent card emits model field", () => {
+  test("subagent card emits uses and no model field", () => {
     const out = scaffoldCard({
       type: "subagent",
       name: "noop",
       description: "no-op",
       aliases: [],
       requires: [],
+      uses: ["methodology/tdd"],
       subagents: [],
-      model: "haiku",
     });
     const parsed = parseCore(out, "subagent");
     expect(parsed.errors).toEqual([]);
-    expect(parsed.frontmatter.model).toBe("haiku");
+    expect(parsed.frontmatter.uses).toEqual(["methodology/tdd"]);
+    expect(out).not.toContain("model:");
   });
 
   test("escapes double-quotes in description", () => {
@@ -63,6 +66,7 @@ describe("scaffoldCard", () => {
       description: 'has "quotes"',
       aliases: [],
       requires: [],
+      uses: [],
       subagents: [],
     });
     expect(out).toContain('description: "has \\"quotes\\""');

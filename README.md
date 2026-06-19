@@ -10,8 +10,8 @@ for a task.
 
 The directory tree IS the vocabulary — no `vocabulary.yaml`, no
 `capabilities.yaml`, no `tags:` / `provides:` / `emits:` / `consumes:`.
-Five frontmatter fields total: `description`, `aliases`, `requires`,
-`subagents`, `model`.
+Five frontmatter fields total: `description`, `aliases`, `requires`, `uses`,
+`subagents`. Harness-specific model selection belongs in harness adapters.
 
 ---
 
@@ -71,9 +71,14 @@ ship `validators/` (executable scripts) plus a `lib/` for shared modules.
 `tagen get`:
 
 1. Fuzzy-matches positional args to `<type>/<name>` (3-char min; exact > prefix > substring > Levenshtein).
-2. Resolves `requires: [<type>]` slots by picking a matched card under that type — alphabetical first, `--pin <type>=<name>` overrides.
-3. Collects subagents declared by review/methodology cards, plus their `validators/*.ts`.
-4. Emits a JSON manifest with all paths root-relative, so the agent resolves them as `root + "/" + path`.
+2. Expands direct `uses: [<type>/<name>]` cards declared by seed subagents.
+3. Resolves `requires: [<type>]` slots over the expanded set — alphabetical first, `--pin <type>=<name>` overrides.
+4. Collects subagents declared by review/methodology cards, plus their `validators/*.ts`.
+5. Emits a JSON manifest with all paths root-relative, so the agent resolves them as `root + "/" + path`.
+
+`tagen validate` also rejects harness-specific model names, lifecycle events,
+paths, and commands under `brain/`. Narrow, checked-in exceptions and
+project-specific terms live in `.tagen/agnostic-guard.json`.
 
 See [docs/specs/SPEC-tagen.md](docs/specs/SPEC-tagen.md) for the full spec
 and [docs/tagen-get-manifest.schema.json](docs/tagen-get-manifest.schema.json)

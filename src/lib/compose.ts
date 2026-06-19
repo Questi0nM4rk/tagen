@@ -1,9 +1,12 @@
+import { findAliasCollisions } from "./aliases.ts";
+import { expandDirectUses } from "./card-references.ts";
 import { rel } from "./catalog.ts";
 import { type FuzzyEntry, fuzzyMatch, MIN_QUERY_LENGTH } from "./fuzzy.ts";
 import {
   type Card,
   type CardId,
   type CardType,
+  cardIndex,
   cardKey,
   type FilledSlot,
   type Manifest,
@@ -47,14 +50,11 @@ export function compose(
   query: ComposeQuery,
   knownTypes: Set<CardType>
 ): ComposeOutcome {
-  const errors: string[] = [];
+  const errors: string[] = [...findAliasCollisions(cards)];
   const warnings: string[] = [];
   const browseTypes: CardType[] = [];
 
-  const index = new Map<string, Card>();
-  for (const c of cards) index.set(cardKey(c.id), c);
-
-  buildAliasIndex(cards, errors);
+  const index = cardIndex(cards);
 
   const matched = new Map<string, Card>();
 
@@ -108,7 +108,11 @@ export function compose(
     return { errors: [], browseTypes, emptyMatch: false };
   }
 
-  const matchedSorted = [...matched.values()].sort(byTypeName);
+  const expanded = expandDirectUses([...matched.values()], cards);
+  if (expanded.errors.length > 0) {
+    return { errors: expanded.errors, browseTypes, emptyMatch: false };
+  }
+  const matchedSorted = expanded.cards.sort(byTypeName);
 
   const requiredTypes = collectRequires(matchedSorted);
   const slots: ResolvedSlot[] = [];
@@ -181,32 +185,6 @@ export function compose(
   };
 
   return { manifest, errors: [], browseTypes, emptyMatch: false };
-}
-
-function buildAliasIndex(cards: Card[], errors: string[]): Map<string, CardId> {
-  const aliases = new Map<string, CardId>();
-  const cardsByName = new Map<string, CardId>();
-  for (const c of cards) cardsByName.set(c.id.name, c.id);
-
-  for (const c of cards) {
-    for (const alias of c.frontmatter.aliases ?? []) {
-      const collidingCanonical = cardsByName.get(alias);
-      if (collidingCanonical) {
-        errors.push(
-          `alias '${alias}' on ${cardKey(c.id)} collides with canonical name ${cardKey(collidingCanonical)}`
-        );
-      }
-      const existing = aliases.get(alias);
-      if (existing) {
-        errors.push(
-          `alias '${alias}' collides between ${cardKey(existing)} and ${cardKey(c.id)}`
-        );
-        continue;
-      }
-      aliases.set(alias, c.id);
-    }
-  }
-  return aliases;
 }
 
 function buildFuzzyEntries(cards: Card[]): FuzzyEntry[] {

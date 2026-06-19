@@ -99,7 +99,7 @@ brain/
 ├── framework/<name>/               # CORE.md, references/
 ├── test/<name>/                    # CORE.md, references/
 ├── architecture/<name>/            # CORE.md, references/
-├── subagent/<name>/                # CORE.md (frontmatter has model: haiku|sonnet|opus)
+├── subagent/<name>/                # CORE.md; may declare uses: [type/name]
 └── protocol/<name>/                # CORE.md, schema.json, validator.ts, examples/{valid,invalid}/
                                     # (protocol cards self-check at validate time;
                                     #  no other card references them.)
@@ -138,7 +138,7 @@ description: "One-line summary. Required."
 aliases: [dotnet]                  # optional; query-time alternate names; globally unique
 requires: [lang]                   # optional; type names this card needs slot-filled
 subagents: [security-reviewer]     # review/methodology only; names of subagents this card dispatches
-model: sonnet                      # subagent only; haiku | sonnet | opus
+uses: [methodology/tdd]            # subagent only; direct canonical card IDs
 ---
 
 # Body — short and dense. Orchestration of subagents (order, parallel/sequential,
@@ -146,7 +146,7 @@ model: sonnet                      # subagent only; haiku | sonnet | opus
 # just lists which subagents this card uses.
 ```
 
-Five fields total: `description`, `aliases`, `requires`, `subagents`, `model`. Anything else in frontmatter is rejected by `tagen validate`.
+Five fields total: `description`, `aliases`, `requires`, `uses`, `subagents`. `uses` is subagent-only; `subagents` is review/methodology-only. Anything else in frontmatter is rejected by `tagen validate`.
 
 ---
 
@@ -198,7 +198,7 @@ Exit codes: 0 (clean), 1 (violations), 2 (brain/ not found).
 
 ### `tagen add`
 
-Interactive scaffold for a new card. Prompts for type, name, description, then type-appropriate optional fields (`aliases`, `requires`, `subagents` on review/methodology, `model` on subagent). Creates `brain/<type>/<name>/CORE.md` with the frontmatter, plus an empty `references/` directory.
+Interactive scaffold for a new card. Prompts for type, name, description, then type-appropriate optional fields (`aliases`, `requires`, `subagents` on review/methodology, `uses` on subagent). Creates `brain/<type>/<name>/CORE.md` with the frontmatter, plus an empty `references/` directory.
 
 ```
 tagen add
@@ -233,8 +233,10 @@ Used by `tagen get`.
      - --type T --name N pairs → exact (type, name).
      - --pin <type>=<name> → recorded for slot resolution.
    Sort matched set alphabetically by (type, name).
-4. Collect requires from matched set: union of all `requires:` arrays.
-5. For each required type T:
+4. For each seed subagent, add its direct `uses:` cards to the matched set.
+   Values are canonical `<type>/<name>` IDs. Expansion is one level only.
+5. Collect requires from the expanded matched set: union of all `requires:` arrays.
+6. For each required type T:
      candidates = matched cards under brain/T/
      pinned = cards in candidates whose name == --pin T=<name> (if any --pin T=… was given)
      if pinned: chosen = pinned[0]
@@ -242,19 +244,19 @@ Used by `tagen get`.
      else: warning "unfilled slot for type T"
      append { type: T, fillerCard: chosen.name, candidates: candidates.names } to slots[]
      if len(candidates) > 1: warning "multiple candidates for type T: <list>. Picked <chosen>. Use --pin T=<name> to override."
-6. For each card in matched set: resolve its references:
+7. For each card in matched set: resolve its references:
      for each file under <card-dir>/references/<topic>.md:
        append to that card's references[] list in the manifest
-7. Resolve subagents: for every review/methodology card in the matched set, read its
+8. Resolve subagents: for every review/methodology card in the matched set, read its
    `subagents:` frontmatter array. Union the names across cards. For each name, resolve to
    `brain/subagent/<name>/CORE.md`. If a name doesn't resolve, warning "unknown subagent: <name>
    referenced by <card>".
-8. Resolve card validators: for review/methodology cards in the matched set,
+9. Resolve card validators: for review/methodology cards in the matched set,
    list <card-dir>/validators/*.ts.
-9. Set `root` = the absolute path of the marketplace dir tagen discovered.
-10. Assemble manifest with all paths root-relative (see contract below).
-11. Output JSON to stdout. Warnings to stderr.
-12. Exit 0 (warnings ok), 1 (validation error), 2 (no matches).
+10. Set `root` = the absolute path of the marketplace dir tagen discovered.
+11. Assemble manifest with all paths root-relative (see contract below).
+12. Output JSON to stdout. Warnings to stderr.
+13. Exit 0 (warnings ok), 1 (validation error), 2 (no matches).
 ```
 
 ---
@@ -323,7 +325,7 @@ All paths in the manifest are relative to the top-level `root` field — the abs
 | `references` | string[] | Reference file paths from non-filler cards. Pull-on-demand; agent reads them only if the task warrants it. |
 | `filled` | object keyed by type | One entry per slot the methodology required. Each entry has `core` (load immediately) and `references` (pull-on-demand). |
 | `slots` | array | Slot resolution metadata: type, chosen filler, all candidates. |
-| `subagents` | string[] | Paths to CORE.md files of subagents the matched methodology dispatches. Agent reads each subagent's CORE.md for its `model:` (which Claude tier to invoke) and body (role + how the methodology calls it). The methodology's CORE.md owns dispatch orchestration. |
+| `subagents` | string[] | Paths to CORE.md files of workers the matched methodology dispatches. Harness adapters choose execution models; the methodology owns portable orchestration. |
 | `validators` | string[] | Paths to card-level validator scripts on review/methodology cards. The methodology decides when and what to pipe through them. |
 | `warnings` | string[] | Non-fatal composition warnings. |
 
@@ -335,7 +337,7 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
 2. Load `core[]` files immediately (the methodology body — orchestration of subagents lives here).
 3. For each entry in `filled{}`: load `core` immediately. Decide per-task which `references` to pull.
 4. The methodology's CORE.md tells the agent **how** to dispatch each subagent in `subagents[]` (order, parallel vs sequential, what input to pass). The manifest just lists which subagent files to consult; tagen does not encode orchestration.
-5. Dispatch a subagent by reading its CORE.md (frontmatter `model:` for which Claude tier to invoke; body for the role and how the methodology calls it) and invoking it with the input the methodology specifies.
+5. Dispatch a subagent by reading its CORE.md for the portable role and input contract. The active harness adapter chooses its execution model and invocation mechanism.
 6. The methodology's CORE.md says when (and whether) to run any of the scripts in `validators[]` against its outputs.
 7. Read `warnings[]` first; decide whether to proceed partial or abort.
 
@@ -373,6 +375,10 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
 | `requires:` value not a known type (no matching `brain/<value>/` dir) | `<card>: unknown type in requires: <value>` |
 | `subagents:` value not a known subagent (no `brain/subagent/<value>/CORE.md`) | `<card>: unknown subagent in subagents: <value>` |
 | `subagents:` declared on a card outside `brain/review/` or `brain/methodology/` | `<card>: subagents allowed only on review and methodology cards` |
+| `uses:` value is not `<type>/<name>` | `<card>: invalid uses target '<value>', expected <type>/<name>` |
+| `uses:` target does not exist | `<card>: unknown card in uses: <type>/<name>` |
+| `uses:` declared outside `brain/subagent/` | `<card>: unknown frontmatter field for type '<type>': uses` |
+| `uses:` graph contains a cycle | `uses cycle: <card> -> <card> -> ...` |
 
 ### Alias rules
 
@@ -382,12 +388,13 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
 | Alias matches a canonical name | `<alias>: collides with canonical name <type>/<name>` |
 | Alias is not a string | `<card>: aliases must be an array of strings` |
 
-### Subagent rules
+### Harness-neutrality rules
 
-| Rule | Error |
-|------|-------|
-| Subagent missing `model:` frontmatter | `subagent/<name>: missing required field: model` |
-| Subagent `model:` not in [haiku, sonnet, opus] | `subagent/<name>: unknown model: <value>` |
+`tagen validate` scans card Markdown, references, protocol JSON, examples, and
+validator TypeScript. It rejects vendor model names, harness names, Claude Code
+lifecycle events, `.claude` paths, and harness-only commands. Findings include
+file, line, rule ID, and token. Optional narrow exceptions and additional local
+terms live in `<root>/.tagen/agnostic-guard.json`.
 
 ### Protocol rules
 
@@ -428,8 +435,8 @@ export interface CardFrontmatter {
   description: string;
   aliases?: string[];
   requires?: CardType[];
+  uses?: string[];                       // subagent only; canonical type/name IDs
   subagents?: string[];                  // review/methodology only
-  model?: "haiku" | "sonnet" | "opus";   // subagent only
 }
 
 export interface Card {
@@ -624,7 +631,7 @@ Each row: chose **X** over **Y** because **Z**. The Z is what tagen would lose i
 | Aliases in card frontmatter | Separate `aliases.yaml` / symlinks | Colocated with the canonical card; one place to look when debugging. Symlinks break on Windows and confuse git diffs; separate YAML drifts. |
 | Read-only by default; only `tagen add` writes | All commands writable | Agents can run query commands repeatedly without disk-mutation risk. Side effects are isolated to one explicit command. |
 | No versioning anywhere | `@v1` suffixes / migration shims / parallel old+new | Single-maintainer closed catalog. Renames in place; one PR updates every reference. Versioning pays only for external consumers we don't have. |
-| No transitive auto-resolution of `requires:` | Auto-pull cards from outside the matched set | Tagen sees only the dir tree and frontmatter. The agent sees task context. Auto-pulling drags in modules the user didn't ask for; manual resolution lets the smarter system decide. |
+| One-level `uses:` plus no transitive `requires:` resolution | Recursive dependency expansion | Concrete workers can name stable ingredients without turning tagen into a recursive package resolver. Dynamic type slots remain chosen by the query. |
 | Hand-maintained `marketplace.json` | Generated from `tools/*/plugin.json` | 15–20 tool plugins; listing by hand is trivial. Generation introduces drift, race conditions, and a build step that can fail. |
 | `yaml` as only runtime dep | Adding `ajv`, `chalk`, `commander`, etc. | Tagen is offline and minimal. Schema validation is the consuming marketplace's dep, not tagen's. CLI argument parsing is small enough to write by hand. |
 | Tools live in `tools/`, not `brain/` | Folding installable plugins into `brain/` | Installable CC plugins are a different concern from compose-into-methodology content. `brain/` is read by tagen at composition time; `tools/` is read by Claude Code at install time. Two readers, two roots. |

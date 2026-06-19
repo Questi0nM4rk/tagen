@@ -30,10 +30,10 @@ export interface CardFrontmatter {
   description: string;
   aliases?: string[];
   requires?: CardType[];
+  /** subagent only; canonical `<type>/<name>` card IDs */
+  uses?: string[];
   /** review/methodology only */
   subagents?: string[];
-  /** subagent only */
-  model?: "haiku" | "sonnet" | "opus";
 }
 
 export interface Card {
@@ -73,6 +73,11 @@ export interface FilledSlot {
   core: string;
   /** Root-relative paths */
   references: string[];
+}
+
+/** Index a card list by `<type>/<name>` for O(1) lookup. */
+export function cardIndex(cards: Card[]): Map<string, Card> {
+  return new Map(cards.map((c) => [cardKey(c.id), c] as const));
 }
 
 export interface Manifest {

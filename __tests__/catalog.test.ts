@@ -71,11 +71,11 @@ describe("loadAllCards", () => {
     expect(strict?.validators).toEqual(["brain/review/strict/validators/no-emoji.ts"]);
   });
 
-  test("subagents carry model frontmatter", () => {
-    const sec = result.cards.find(
-      (c) => c.id.type === "subagent" && c.id.name === "security-reviewer"
+  test("subagents carry harness-neutral uses frontmatter", () => {
+    const implementer = result.cards.find(
+      (c) => c.id.type === "subagent" && c.id.name === "implementer"
     );
-    expect(sec?.frontmatter.model).toBe("sonnet");
+    expect(implementer?.frontmatter.uses).toEqual(["methodology/tdd"]);
   });
 
   test("protocol cards include schema/validator/examples paths", () => {
