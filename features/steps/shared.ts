@@ -14,9 +14,9 @@ export interface TaGenWorld extends World {
   /** Working directory for the next runTagen invocation. */
   cwd: string;
   /** Result of the last CLI invocation. */
-  result?: CLIResult;
+  result: CLIResult | undefined;
   /** Cleanup callback set by "temporary brain" Givens; run in the After hook. */
-  cleanup?: () => void;
+  cleanup: (() => void) | undefined;
 }
 
 const ROOT = join(import.meta.dir, "..", "..");

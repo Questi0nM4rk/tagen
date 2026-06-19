@@ -21,7 +21,7 @@ const ORIGINAL_STDERR = process.stderr.write.bind(process.stderr);
 const ORIGINAL_STDOUT = process.stdout.write.bind(process.stdout);
 
 interface ExitCapture {
-  exitCode?: number;
+  exitCode: number | undefined;
   stderr: string;
   stdout: string;
 }

@@ -352,8 +352,9 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
 | Rule | Error |
 |------|-------|
 | Card path is not a directory | `<path>: card must be a directory, not a file` |
-| Missing `CORE.md` | `<type>/<name>: missing CORE.md` |
-| `CORE.md` is not a file | `<type>/<name>/CORE.md: must be a file` |
+| Missing `CORE.md` | `<type>/<name>/CORE.md: missing required file` |
+| `CORE.md` is not a regular file | `<type>/<name>/CORE.md: must be a regular file` |
+| Symlink anywhere under `brain/` | `<path>: symlinks are not allowed under brain/` |
 | `CORE.md` ≥ 300 lines (excluding frontmatter) | `<type>/<name>/CORE.md: exceeds 300 lines (got <N>); move overflow into references/` |
 | Card dir name not lowercase kebab-case | `<type>/<name>: card name must match [a-z][a-z0-9-]*` |
 | Type dir name not lowercase | `<type>: type name must match [a-z][a-z0-9-]*` |

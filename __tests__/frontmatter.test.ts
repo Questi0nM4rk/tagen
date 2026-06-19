@@ -11,6 +11,13 @@ describe("parseCore — frontmatter", () => {
     expect(r.body).toContain("# Body");
   });
 
+  test("accepts CRLF frontmatter delimiters", () => {
+    const r = parseCore("---\r\ndescription: ok\r\n---\r\n# Body\r\n", "lang");
+    expect(r.errors).toEqual([]);
+    expect(r.frontmatter.description).toBe("ok");
+    expect(r.body).toBe("# Body\r\n");
+  });
+
   test("missing frontmatter → error", () => {
     const r = parseCore("# No frontmatter here\n", "lang");
     expect(r.errors[0]).toContain("missing YAML frontmatter");
