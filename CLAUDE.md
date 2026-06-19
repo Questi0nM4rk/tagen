@@ -50,8 +50,12 @@ bun run src/main.ts <command>  # run directly during development
 
 ```
 src/
-├── main.ts                 # CLI entrypoint, arg parsing, command dispatch
+├── cli/
+│   ├── args.ts             # raw argv parsing
+│   ├── command.ts          # typed descriptors and command context
+│   └── errors.ts           # CLI failure reporting
 ├── commands/
+│   ├── index.ts            # readonly descriptor registry
 │   ├── add.ts              # tagen add (interactive scaffold; only writer)
 │   ├── get.ts              # tagen get
 │   ├── list.ts             # tagen list
@@ -59,13 +63,20 @@ src/
 ├── lib/
 │   ├── types.ts            # Card, CardFrontmatter, Manifest, …
 │   ├── catalog.ts          # findBrainDir(), loadAllCards(), marketplaceRoot()
+│   ├── errors.ts           # safe unknown-error message extraction
 │   ├── frontmatter.ts      # parseCore() with strict per-type field allowlist
 │   ├── fuzzy.ts            # exact > prefix > substring > Levenshtein matcher
+│   ├── aliases.ts          # global alias collision detection
+│   ├── card-references.ts  # canonical uses resolution + cycle detection
+│   ├── harness-guard.ts    # harness-specific token scanner
 │   └── compose.ts          # compose(), buildManifest(), knownTypesFromCards()
+├── main.ts                 # globals, lookup, catalog policy, descriptor execution
 └── validator-runtime.ts    # @questi0nm4rk/tagen/validator-runtime export
 ```
 
-Each command exports a `run<Name>(...): Promise<void> | void`. `main.ts` dispatches by argv[2].
+Each command exports its direct `run<Name>(...)` API and one typed descriptor.
+`main.ts` resolves descriptors from `commands/index.ts`; it contains no
+command-name switch.
 
 ---
 
@@ -83,6 +94,8 @@ __tests__/
 ├── validate.test.ts        # clean fixture passes; broken-fixture clones per rule class
 ├── get.test.ts             # manifest + browse intent + exit codes
 ├── add.test.ts             # scaffoldCard frontmatter shape + interactive scaffold
+├── cli-args.test.ts        # descriptor-driven argv parser policies
+├── command-registry.test.ts # descriptor uniqueness + help metadata
 ├── manifest-contract.test.ts # `tagen get --json` validated against the schema
 ├── perf.test.ts            # 100-card synthetic fixture < 500ms
 └── cli.test.ts             # --help / --version / unknown command
@@ -128,8 +141,8 @@ Never claim done if `bun test`, `bun run typecheck`, or `bun run lint` haven't b
 ## Adding a Command
 
 1. Create `src/commands/<name>.ts`
-2. Export `run<Name>(args): Promise<void> | void`
-3. Register in `src/main.ts` dispatch
+2. Export `run<Name>(args): Promise<void> | void` and a typed descriptor
+3. Add the descriptor to `src/commands/index.ts`
 4. Add `__tests__/<name>.test.ts`
 5. Add scenarios to `features/<name>.feature` (steps go in `common.steps.ts`)
 

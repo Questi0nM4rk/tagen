@@ -1,4 +1,13 @@
+import { booleanFlag, defineCommand, valueFlag } from "../cli/command.ts";
 import { type Card, type CardType, cardKey } from "../lib/types.ts";
+
+const TYPE_FLAG = valueFlag("--type", "--type T", "Restrict to one type");
+const ALIASES_FLAG = booleanFlag(
+  "--aliases",
+  "--aliases",
+  "Include each card's aliases"
+);
+const JSON_FLAG = booleanFlag("--json", "--json", "Machine-readable output");
 
 export interface ListOptions {
   json: boolean;
@@ -41,3 +50,22 @@ export function runList(cards: Card[], opts: ListOptions): void {
     }
   }
 }
+
+export const listCommand = defineCommand({
+  name: "list",
+  summary: "List catalog cards as <type>/<name>",
+  flags: [TYPE_FLAG, ALIASES_FLAG, JSON_FLAG],
+  positional: "forbid",
+  catalog: "clean",
+  decode(args): ListOptions {
+    const type = args.value(TYPE_FLAG);
+    return {
+      json: args.has(JSON_FLAG),
+      aliases: args.has(ALIASES_FLAG),
+      ...(type === undefined ? {} : { type }),
+    };
+  },
+  execute(context, options) {
+    runList(context.cards, options);
+  },
+});

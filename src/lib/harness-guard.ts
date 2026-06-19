@@ -1,6 +1,7 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AgnosticGuardConfig } from "./agnostic-config.ts";
+import { rel } from "./catalog.ts";
 
 interface GuardRule {
   id: string;
@@ -66,15 +67,15 @@ export function findHarnessLeaks(
   const leaks: HarnessLeak[] = [];
 
   for (const file of listTextFiles(brainDir)) {
-    const rel = relative(root, file);
+    const relativePath = rel(file, root);
     const lines = readFileSync(file, "utf8").split(/\r?\n/);
     for (const [index, line] of lines.entries()) {
       for (const rule of rules) {
-        if (isAllowed(rel, rule.id, config)) continue;
+        if (isAllowed(relativePath, rule.id, config)) continue;
         rule.pattern.lastIndex = 0;
         for (const match of line.matchAll(rule.pattern)) {
           leaks.push({
-            path: rel,
+            path: relativePath,
             line: index + 1,
             ruleId: rule.id,
             token: match[0].trim(),
@@ -100,7 +101,6 @@ function listTextFiles(dir: string): string[] {
       continue;
     }
     if (!entry.isFile() || !hasScannedExtension(entry.name)) continue;
-    if (statSync(path).size > 1_000_000) continue;
     out.push(path);
   }
   return out.sort();
@@ -112,10 +112,11 @@ function hasScannedExtension(name: string): boolean {
 }
 
 function isAllowed(path: string, ruleId: string, config: AgnosticGuardConfig): boolean {
-  return config.allow.some(
-    (allowance) =>
-      path.startsWith(allowance.pathPrefix) && allowance.rules.includes(ruleId)
-  );
+  return config.allow.some((allowance) => {
+    const prefix = allowance.pathPrefix.replace(/\/+$/, "");
+    const pathMatches = path === prefix || path.startsWith(`${prefix}/`);
+    return pathMatches && allowance.rules.includes(ruleId);
+  });
 }
 
 function escapeRegExp(value: string): string {

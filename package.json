@@ -42,15 +42,16 @@
   },
   "files": [
     "bin/tagen.js",
-    "src/validator-runtime.ts"
+    "src/validator-runtime.ts",
+    "src/lib/errors.ts"
   ],
   "scripts": {
     "build": "bun build src/main.ts --compile --outfile bin/tagen",
     "build:npm": "bun build src/main.ts --target=bun --outfile bin/tagen.js && printf '#!/usr/bin/env bun\n' | cat - bin/tagen.js > /tmp/tagen-tmp-$$.js && mv /tmp/tagen-tmp-$$.js bin/tagen.js && chmod +x bin/tagen.js",
     "test": "bun test",
-    "typecheck": "tsgo --noEmit",
-    "lint": "biome check src/ __tests__/",
-    "lint:fix": "biome check --write src/ __tests__/",
+    "typecheck": "tsc --noEmit && tsgo --noEmit",
+    "lint": "biome check src/ __tests__/ features/ scripts/",
+    "lint:fix": "biome check --write src/ __tests__/ features/ scripts/",
     "check:doc-counts": "bun scripts/check-doc-counts.ts",
     "changelog": "git cliff -o CHANGELOG.md",
     "changelog:unreleased": "git cliff --unreleased --prepend CHANGELOG.md",
@@ -58,13 +59,13 @@
   },
   "dependencies": {
     "ajv": "^8.20.0",
-    "yaml": "^2.8.0"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.8",
+    "@biomejs/biome": "^2.5.0",
     "@questi0nm4rk/feats": "^1.0.1",
-    "@typescript/native-preview": "latest",
-    "bun-types": "latest",
-    "typescript": "^6.0.2"
+    "@typescript/native-preview": "^7.0.0-dev.20260619.1",
+    "bun-types": "^1.3.14",
+    "typescript": "^6.0.3"
   }
 }

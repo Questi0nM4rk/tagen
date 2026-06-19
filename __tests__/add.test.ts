@@ -59,17 +59,22 @@ describe("scaffoldCard", () => {
     expect(out).not.toContain("model:");
   });
 
-  test("escapes double-quotes in description", () => {
+  test("round-trips YAML-sensitive scalar characters", () => {
+    const description = 'ends with \\ and contains "quotes": #still-text';
     const out = scaffoldCard({
       type: "lang",
       name: "x",
-      description: 'has "quotes"',
-      aliases: [],
-      requires: [],
+      description,
+      aliases: ["c#"],
+      requires: ["lang:base"],
       uses: [],
       subagents: [],
     });
-    expect(out).toContain('description: "has \\"quotes\\""');
+    const parsed = parseCore(out, "lang");
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.frontmatter.description).toBe(description);
+    expect(parsed.frontmatter.aliases).toEqual(["c#"]);
+    expect(parsed.frontmatter.requires).toEqual(["lang:base"]);
   });
 });
 

@@ -7,6 +7,7 @@
  *
  * Import as: `import { readPayload, pass, fail } from "@questi0nm4rk/tagen/validator-runtime";`
  */
+import { errorMessage } from "./lib/errors.ts";
 
 /** Read JSON payload from stdin. Exits 1 with a clear error if stdin is empty or invalid JSON. */
 export async function readPayload<T = unknown>(): Promise<T> {
@@ -22,9 +23,7 @@ export async function readPayload<T = unknown>(): Promise<T> {
   try {
     return JSON.parse(raw) as T;
   } catch (err) {
-    process.stderr.write(
-      `validator: invalid JSON on stdin: ${(err as Error).message}\n`
-    );
+    process.stderr.write(`validator: invalid JSON on stdin: ${errorMessage(err)}\n`);
     process.exit(1);
   }
 }
