@@ -1,11 +1,11 @@
 # CLAUDE.md — tagen
 
 Standalone read-only CLI that walks a calling project's `brain/<type>/<name>/`
-directory tree of typed cards and emits a JSON composition manifest.
+directory tree of typed cards and emits a harness-neutral JSON composition manifest.
 
 The directory tree IS the vocabulary — no `vocabulary.yaml`, no `capabilities.yaml`,
 no `tags:` / `provides:` / `emits:` / `consumes:` frontmatter. Five frontmatter
-fields exist: `description`, `aliases`, `requires`, `subagents`, `model`.
+fields exist: `description`, `aliases`, `requires`, `uses`, `subagents`.
 
 Spec: `docs/specs/SPEC-tagen.md`. Manifest contract: `docs/tagen-get-manifest.schema.json`.
 
@@ -167,8 +167,13 @@ Adding a new type = `mkdir brain/<newtype>/`. Adding a new card =
 
 ### Strict per-type frontmatter allowlist
 Every type has an exact allowed-field set. `subagents:` is review/methodology
-only. `model:` is subagent only. Anything outside the allowlist for a given
-type is a `tagen validate` error.
+only. `uses:` is subagent only and names canonical `<type>/<name>` cards.
+Anything outside the allowlist for a given type is a `tagen validate` error.
+
+### Harness-neutral brain
+`brain/` contains no vendor model names, harness lifecycle events, harness
+paths, or harness-only commands. `tagen validate` enforces this through the
+agnostic guard. Harness adapters own model choice and registration details.
 
 ### Read-only by contract
 Every command except `add` is read-only. `tagen get` writes the manifest to stdout, warnings to stderr.

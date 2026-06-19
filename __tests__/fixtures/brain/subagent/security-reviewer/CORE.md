@@ -1,6 +1,5 @@
 ---
 description: "Domain-scoped security review of a diff partition."
-model: sonnet
 ---
 
 # Security Reviewer

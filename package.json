@@ -1,15 +1,13 @@
 {
   "name": "@questi0nm4rk/tagen",
-  "version": "2.0.0",
-  "description": "Skill-graph CLI — assemble Claude Code plugins from tagged catalog cards",
+  "version": "3.0.0",
+  "description": "Harness-agnostic context graph CLI for composable brain cards",
   "keywords": [
-    "claude-code",
-    "claude-plugins",
-    "skill-graph",
-    "plugin-builder",
+    "agent-context",
+    "context-graph",
+    "harness-agnostic",
+    "prompt-composition",
     "ai-workflow",
-    "claude",
-    "anthropic",
     "markdown",
     "yaml"
   ],

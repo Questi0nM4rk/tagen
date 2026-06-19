@@ -1,4 +1,6 @@
 import { expect } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { After, Before, Given, Then, When } from "@questi0nm4rk/feats";
 import {
   cloneFixtureBrain,
@@ -35,6 +37,13 @@ Given<TaGenWorld>(
     world.cleanup = cleanup;
   }
 );
+
+Given<TaGenWorld>("a card contains harness-specific content", (world: TaGenWorld) => {
+  writeFileSync(
+    join(world.cwd, "brain", "subagent", "security-reviewer", "CORE.md"),
+    `---\ndescription: "x"\n---\n# x\n\nUse Claude Code.\n`
+  );
+});
 
 // ─── When ─────────────────────────────────────────────────────────────────────
 

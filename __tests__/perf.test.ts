@@ -73,10 +73,7 @@ function generate100CardFixture(brain: string): void {
   }
   for (let i = 0; i < 10; i++) {
     generators.push(() =>
-      writeCard(brain, "subagent", `sub-${i}`, [
-        `description: "sub ${i}"`,
-        "model: sonnet",
-      ])
+      writeCard(brain, "subagent", `sub-${i}`, [`description: "sub ${i}"`])
     );
   }
   for (let i = 0; i < 5; i++) {
