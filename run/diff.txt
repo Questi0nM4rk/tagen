@@ -1,0 +1,2299 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 613d63f..49c0df0 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -50,8 +50,12 @@ bun run src/main.ts <command>  # run directly during development
+ 
+ ```
+ src/
+-├── main.ts                 # CLI entrypoint, arg parsing, command dispatch
++├── cli/
++│   ├── args.ts             # raw argv parsing
++│   ├── command.ts          # typed descriptors and command context
++│   └── errors.ts           # CLI failure reporting
+ ├── commands/
++│   ├── index.ts            # readonly descriptor registry
+ │   ├── add.ts              # tagen add (interactive scaffold; only writer)
+ │   ├── get.ts              # tagen get
+ │   ├── list.ts             # tagen list
+@@ -59,13 +63,20 @@ src/
+ ├── lib/
+ │   ├── types.ts            # Card, CardFrontmatter, Manifest, …
+ │   ├── catalog.ts          # findBrainDir(), loadAllCards(), marketplaceRoot()
++│   ├── errors.ts           # safe unknown-error message extraction
+ │   ├── frontmatter.ts      # parseCore() with strict per-type field allowlist
+ │   ├── fuzzy.ts            # exact > prefix > substring > Levenshtein matcher
++│   ├── aliases.ts          # global alias collision detection
++│   ├── card-references.ts  # canonical uses resolution + cycle detection
++│   ├── harness-guard.ts    # harness-specific token scanner
+ │   └── compose.ts          # compose(), buildManifest(), knownTypesFromCards()
++├── main.ts                 # globals, lookup, catalog policy, descriptor execution
+ └── validator-runtime.ts    # @questi0nm4rk/tagen/validator-runtime export
+ ```
+ 
+-Each command exports a `run<Name>(...): Promise<void> | void`. `main.ts` dispatches by argv[2].
++Each command exports its direct `run<Name>(...)` API and one typed descriptor.
++`main.ts` resolves descriptors from `commands/index.ts`; it contains no
++command-name switch.
+ 
+ ---
+ 
+@@ -83,6 +94,8 @@ __tests__/
+ ├── validate.test.ts        # clean fixture passes; broken-fixture clones per rule class
+ ├── get.test.ts             # manifest + browse intent + exit codes
+ ├── add.test.ts             # scaffoldCard frontmatter shape + interactive scaffold
++├── cli-args.test.ts        # descriptor-driven argv parser policies
++├── command-registry.test.ts # descriptor uniqueness + help metadata
+ ├── manifest-contract.test.ts # `tagen get --json` validated against the schema
+ ├── perf.test.ts            # 100-card synthetic fixture < 500ms
+ └── cli.test.ts             # --help / --version / unknown command
+@@ -128,8 +141,8 @@ Never claim done if `bun test`, `bun run typecheck`, or `bun run lint` haven't b
+ ## Adding a Command
+ 
+ 1. Create `src/commands/<name>.ts`
+-2. Export `run<Name>(args): Promise<void> | void`
+-3. Register in `src/main.ts` dispatch
++2. Export `run<Name>(args): Promise<void> | void` and a typed descriptor
++3. Add the descriptor to `src/commands/index.ts`
+ 4. Add `__tests__/<name>.test.ts`
+ 5. Add scenarios to `features/<name>.feature` (steps go in `common.steps.ts`)
+ 
+diff --git a/__tests__/add.test.ts b/__tests__/add.test.ts
+index fd796dd..5f0c348 100644
+--- a/__tests__/add.test.ts
++++ b/__tests__/add.test.ts
+@@ -59,17 +59,22 @@ describe("scaffoldCard", () => {
+     expect(out).not.toContain("model:");
+   });
+ 
+-  test("escapes double-quotes in description", () => {
++  test("round-trips YAML-sensitive scalar characters", () => {
++    const description = 'ends with \\ and contains "quotes": #still-text';
+     const out = scaffoldCard({
+       type: "lang",
+       name: "x",
+-      description: 'has "quotes"',
+-      aliases: [],
+-      requires: [],
++      description,
++      aliases: ["c#"],
++      requires: ["lang:base"],
+       uses: [],
+       subagents: [],
+     });
+-    expect(out).toContain('description: "has \\"quotes\\""');
++    const parsed = parseCore(out, "lang");
++    expect(parsed.errors).toEqual([]);
++    expect(parsed.frontmatter.description).toBe(description);
++    expect(parsed.frontmatter.aliases).toEqual(["c#"]);
++    expect(parsed.frontmatter.requires).toEqual(["lang:base"]);
+   });
+ });
+ 
+diff --git a/__tests__/cli-args.test.ts b/__tests__/cli-args.test.ts
+new file mode 100644
+index 0000000..7818055
+--- /dev/null
++++ b/__tests__/cli-args.test.ts
+@@ -0,0 +1,59 @@
++import { describe, expect, test } from "bun:test";
++import { parseCommandArgs } from "../src/cli/args.ts";
++import { booleanFlag, repeatableValueFlag, valueFlag } from "../src/cli/command.ts";
++
++const TYPE_FLAG = valueFlag("--type", "--type T", "type");
++const PIN_FLAG = repeatableValueFlag("--pin", "--pin T=N", "pin");
++const JSON_FLAG = booleanFlag("--json", "--json", "json");
++const KNOWN_FLAGS = new Set(["--type", "--pin", "--json"]);
++
++describe("parseCommandArgs", () => {
++  test("rejects an unknown option", () => {
++    expect(() =>
++      parseCommandArgs(
++        ["--bogus"],
++        { name: "example", flags: [], positional: "allow" },
++        KNOWN_FLAGS
++      )
++    ).toThrow("unknown option: --bogus");
++  });
++
++  test("rejects a value flag with no value", () => {
++    expect(() =>
++      parseCommandArgs(
++        ["--type"],
++        { name: "example", flags: [TYPE_FLAG], positional: "allow" },
++        KNOWN_FLAGS
++      )
++    ).toThrow("--type requires a value");
++  });
++
++  test("rejects a repeated non-repeatable flag", () => {
++    expect(() =>
++      parseCommandArgs(
++        ["--type", "lang", "--type", "review"],
++        { name: "example", flags: [TYPE_FLAG], positional: "allow" },
++        KNOWN_FLAGS
++      )
++    ).toThrow("--type may not be repeated");
++  });
++
++  test("preserves every value for a repeatable flag", () => {
++    const parsed = parseCommandArgs(
++      ["--pin", "lang=rust", "--pin", "review=strict"],
++      { name: "example", flags: [PIN_FLAG], positional: "allow" },
++      KNOWN_FLAGS
++    );
++    expect(parsed.values(PIN_FLAG)).toEqual(["lang=rust", "review=strict"]);
++  });
++
++  test("rejects positional arguments when forbidden", () => {
++    expect(() =>
++      parseCommandArgs(
++        ["ignored"],
++        { name: "example", flags: [JSON_FLAG], positional: "forbid" },
++        KNOWN_FLAGS
++      )
++    ).toThrow("unexpected positional argument for 'example': ignored");
++  });
++});
+diff --git a/__tests__/cli.test.ts b/__tests__/cli.test.ts
+index 04fae81..f26185b 100644
+--- a/__tests__/cli.test.ts
++++ b/__tests__/cli.test.ts
+@@ -1,5 +1,6 @@
+ import { describe, expect, test } from "bun:test";
+-import { readFileSync } from "node:fs";
++import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ 
+ const ROOT = join(import.meta.dir, "..");
+@@ -10,13 +11,16 @@ const PKG_VERSION = (
+   }
+ ).version;
+ 
+-async function runCli(args: string[]): Promise<{
++async function runCli(
++  args: string[],
++  cwd: string = ROOT
++): Promise<{
+   exitCode: number;
+   stdout: string;
+   stderr: string;
+ }> {
+   const proc = Bun.spawn(["bun", "run", ENTRY, ...args], {
+-    cwd: ROOT,
++    cwd,
+     stdout: "pipe",
+     stderr: "pipe",
+     stdin: "ignore",
+@@ -59,6 +63,38 @@ describe("tagen --version (issue #19)", () => {
+     expect(exitCode).toBe(0);
+     expect(stdout.trim()).toBe(PKG_VERSION);
+   });
++
++  test("compiled standalone binary prints the package version", async () => {
++    const tmp = mkdtempSync(join(tmpdir(), "tagen-compiled-"));
++    const binary = join(tmp, "tagen");
++    try {
++      const build = Bun.spawn(
++        ["bun", "build", ENTRY, "--compile", "--outfile", binary],
++        {
++          cwd: ROOT,
++          stdout: "pipe",
++          stderr: "pipe",
++        }
++      );
++      expect(await build.exited).toBe(0);
++
++      const proc = Bun.spawn([binary, "--version"], {
++        cwd: "/tmp",
++        stdout: "pipe",
++        stderr: "pipe",
++      });
++      const [exitCode, stdout, stderr] = await Promise.all([
++        proc.exited,
++        new Response(proc.stdout).text(),
++        new Response(proc.stderr).text(),
++      ]);
++      expect(exitCode).toBe(0);
++      expect(stderr).toBe("");
++      expect(stdout.trim()).toBe(PKG_VERSION);
++    } finally {
++      rmSync(tmp, { recursive: true, force: true });
++    }
++  });
+ });
+ 
+ // ─── help shape ───────────────────────────────────────────────────────────────
+@@ -88,4 +124,66 @@ describe("tagen <unknown>", () => {
+     expect(r.stderr).toContain("Unknown command");
+     expect(r.stderr).toContain("--help");
+   });
++
++  test("unknown options fail instead of becoming fuzzy query arguments", async () => {
++    const r = await runCli(["get", "--bogus"]);
++    expect(r.exitCode).toBe(1);
++    expect(r.stderr).toContain("unknown option: --bogus");
++  });
++
++  test("known options are rejected on commands that do not support them", async () => {
++    const r = await runCli(["list", "--verbose"]);
++    expect(r.exitCode).toBe(1);
++    expect(r.stderr).toContain("--verbose is not valid for 'list'");
++  });
++
++  test("non-get commands reject ignored positional arguments", async () => {
++    const r = await runCli(["validate", "ignored"]);
++    expect(r.exitCode).toBe(1);
++    expect(r.stderr).toContain("unexpected positional argument");
++  });
++
++  test("list fails on malformed cards instead of returning a partial catalog", async () => {
++    const tmp = mkdtempSync(join(tmpdir(), "tagen-malformed-list-"));
++    try {
++      const card = join(tmp, "brain", "lang", "broken");
++      mkdirSync(card, { recursive: true });
++      writeFileSync(join(card, "CORE.md"), "# missing frontmatter\n");
++      const proc = Bun.spawn(["bun", "run", ENTRY, "list"], {
++        cwd: tmp,
++        stdout: "pipe",
++        stderr: "pipe",
++      });
++      const [exitCode, stdout, stderr] = await Promise.all([
++        proc.exited,
++        new Response(proc.stdout).text(),
++        new Response(proc.stderr).text(),
++      ]);
++      expect(exitCode).toBe(1);
++      expect(stdout).toBe("");
++      expect(stderr).toContain("CORE.md missing YAML frontmatter");
++    } finally {
++      rmSync(tmp, { recursive: true, force: true });
++    }
++  });
++
++  test("get fails on malformed cards instead of composing a partial catalog", async () => {
++    const tmp = mkdtempSync(join(tmpdir(), "tagen-malformed-get-"));
++    try {
++      const valid = join(tmp, "brain", "lang", "valid");
++      const broken = join(tmp, "brain", "lang", "broken");
++      mkdirSync(valid, { recursive: true });
++      mkdirSync(broken, { recursive: true });
++      writeFileSync(join(valid, "CORE.md"), "---\ndescription: valid\n---\n# valid\n");
++      writeFileSync(join(broken, "CORE.md"), "# missing frontmatter\n");
++
++      const result = await runCli(["get", "valid", "--json"], tmp);
++
++      expect(result.exitCode).toBe(1);
++      expect(result.stdout).toBe("");
++      expect(result.stderr).toContain("CORE.md missing YAML frontmatter");
++    } finally {
++      rmSync(tmp, { recursive: true, force: true });
++    }
++  });
+ });
+diff --git a/__tests__/command-registry.test.ts b/__tests__/command-registry.test.ts
+new file mode 100644
+index 0000000..ade3166
+--- /dev/null
++++ b/__tests__/command-registry.test.ts
+@@ -0,0 +1,20 @@
++import { describe, expect, test } from "bun:test";
++import { commands } from "../src/commands/index.ts";
++
++describe("command registry", () => {
++  test("command names are unique", () => {
++    const names = commands.map((command) => command.name);
++    expect(new Set(names).size).toBe(names.length);
++  });
++
++  test("every command contributes help metadata", () => {
++    for (const command of commands) {
++      expect(command.name.length).toBeGreaterThan(0);
++      expect(command.summary.length).toBeGreaterThan(0);
++      for (const flag of command.flags) {
++        expect(flag.usage.length).toBeGreaterThan(0);
++        expect(flag.description.length).toBeGreaterThan(0);
++      }
++    }
++  });
++});
+diff --git a/__tests__/compose.test.ts b/__tests__/compose.test.ts
+index a79f50d..758b519 100644
+--- a/__tests__/compose.test.ts
++++ b/__tests__/compose.test.ts
+@@ -83,6 +83,27 @@ describe("compose", () => {
+     expect(r.manifest?.slots[0]?.fillerCard).toBe("");
+   });
+ 
++  test("requires pointing to an unknown catalog type blocks composition", () => {
++    const strict = cards.find(
++      (card) => card.id.type === "review" && card.id.name === "strict"
++    );
++    if (!strict) throw new Error("fixture card missing");
++    const modified = cards.map((card) =>
++      card === strict
++        ? {
++            ...card,
++            frontmatter: {
++              ...card.frontmatter,
++              requires: ["missing-type"],
++            },
++          }
++        : card
++    );
++    const r = compose(modified, ROOT, q(["strict"]), knownTypes);
++    expect(r.errors).toEqual(["unknown type in requires: missing-type"]);
++    expect(r.manifest).toBeUndefined();
++  });
++
+   test("subagents collected from review/methodology", () => {
+     const r = compose(cards, ROOT, q(["strict", "csharp"]), knownTypes);
+     expect(r.manifest?.subagents).toEqual([
+diff --git a/__tests__/frontmatter.test.ts b/__tests__/frontmatter.test.ts
+index 7ce81a3..271932a 100644
+--- a/__tests__/frontmatter.test.ts
++++ b/__tests__/frontmatter.test.ts
+@@ -11,6 +11,13 @@ describe("parseCore — frontmatter", () => {
+     expect(r.body).toContain("# Body");
+   });
+ 
++  test("accepts CRLF frontmatter delimiters", () => {
++    const r = parseCore("---\r\ndescription: ok\r\n---\r\n# Body\r\n", "lang");
++    expect(r.errors).toEqual([]);
++    expect(r.frontmatter.description).toBe("ok");
++    expect(r.body).toBe("# Body\r\n");
++  });
++
+   test("missing frontmatter → error", () => {
+     const r = parseCore("# No frontmatter here\n", "lang");
+     expect(r.errors[0]).toContain("missing YAML frontmatter");
+diff --git a/__tests__/get.test.ts b/__tests__/get.test.ts
+index 14a9982..fecf3a2 100644
+--- a/__tests__/get.test.ts
++++ b/__tests__/get.test.ts
+@@ -21,7 +21,7 @@ const ORIGINAL_STDERR = process.stderr.write.bind(process.stderr);
+ const ORIGINAL_STDOUT = process.stdout.write.bind(process.stdout);
+ 
+ interface ExitCapture {
+-  exitCode?: number;
++  exitCode: number | undefined;
+   stderr: string;
+   stdout: string;
+ }
+diff --git a/__tests__/harness-guard.test.ts b/__tests__/harness-guard.test.ts
+index d54fc5a..ab1fa47 100644
+--- a/__tests__/harness-guard.test.ts
++++ b/__tests__/harness-guard.test.ts
+@@ -42,4 +42,41 @@ describe("harness guard", () => {
+       rmSync(root, { recursive: true, force: true });
+     }
+   });
++
++  test("scans large files and applies allowance prefixes on path boundaries", () => {
++    const root = mkdtempSync(join(tmpdir(), "tagen-guard-boundary-"));
++    try {
++      const brain = join(root, "brain");
++      const allowed = join(brain, "architecture", "cli");
++      const sibling = join(brain, "architecture", "cli-extra");
++      mkdirSync(allowed, { recursive: true });
++      mkdirSync(sibling, { recursive: true });
++      writeFileSync(join(allowed, "CORE.md"), "Claude Code\n");
++      writeFileSync(
++        join(sibling, "CORE.md"),
++        `${"portable ".repeat(140_000)}Claude Code\n`
++      );
++
++      const leaks = findHarnessLeaks(brain, root, {
++        additionalTerms: [],
++        allow: [
++          {
++            pathPrefix: "brain/architecture/cli",
++            rules: ["harness-name"],
++          },
++        ],
++      });
++
++      expect(leaks).toEqual([
++        {
++          path: "brain/architecture/cli-extra/CORE.md",
++          line: 1,
++          ruleId: "harness-name",
++          token: "Claude Code",
++        },
++      ]);
++    } finally {
++      rmSync(root, { recursive: true, force: true });
++    }
++  });
+ });
+diff --git a/__tests__/validate.test.ts b/__tests__/validate.test.ts
+index 9b5b163..ec8680c 100644
+--- a/__tests__/validate.test.ts
++++ b/__tests__/validate.test.ts
+@@ -1,5 +1,12 @@
+ import { describe, expect, test } from "bun:test";
+-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import {
++  cpSync,
++  mkdirSync,
++  mkdtempSync,
++  rmSync,
++  symlinkSync,
++  writeFileSync,
++} from "node:fs";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ import { runValidate } from "../src/commands/validate.ts";
+@@ -10,8 +17,8 @@ const CLEAN_BRAIN = join(FIXTURES, "brain");
+ 
+ function makeContext(brainDir: string) {
+   const root = marketplaceRoot(brainDir);
+-  const { cards, protocols, frontmatterErrors } = loadAllCards(brainDir);
+-  return { cards, protocols, root, frontmatterErrors };
++  const { cards, protocols, frontmatterErrors, catalogErrors } = loadAllCards(brainDir);
++  return { cards, protocols, root, frontmatterErrors, catalogErrors };
+ }
+ 
+ const ORIG_EXIT = process.exit;
+@@ -75,6 +82,21 @@ describe("runValidate — clean fixture", () => {
+ });
+ 
+ describe("runValidate — broken cards", () => {
++  test("reports catalog and frontmatter failures in one diagnostic run", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      mkdirSync(join(b, "lang", "missing-core"));
++      writeFileSync(join(b, "lang", "csharp", "CORE.md"), "# missing frontmatter\n");
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("lang/missing-core/CORE.md: missing required file");
++      expect(stderr).toContain("lang/csharp: CORE.md missing YAML frontmatter");
++    } finally {
++      tearDown();
++    }
++  });
++
+   test("unknown requires type", () => {
+     const { brainDir, tearDown } = cloneFixture((b) => {
+       writeFileSync(
+@@ -337,6 +359,22 @@ describe("runValidate — broken cards", () => {
+     }
+   });
+ 
++  test("alias collisions are case-insensitive like fuzzy matching", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      writeFileSync(
++        join(b, "lang", "python", "CORE.md"),
++        `---\ndescription: "x"\naliases: [DotNet]\n---\n# x\n`
++      );
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("alias 'DotNet' collides between");
++    } finally {
++      tearDown();
++    }
++  });
++
+   test("alias collides with canonical name", () => {
+     const { brainDir, tearDown } = cloneFixture((b) => {
+       writeFileSync(
+@@ -401,6 +439,83 @@ describe("runValidate — broken cards", () => {
+     }
+   });
+ 
++  test("CORE.md symlinks are rejected instead of bypassing content validation", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      const core = join(b, "lang", "rust", "CORE.md");
++      const target = join(b, "..", "external.md");
++      writeFileSync(target, `---\ndescription: "x"\n---\n# x\n\nUse Claude Code.\n`);
++      rmSync(core);
++      symlinkSync(target, core);
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("CORE.md: symlinks are not allowed under brain/");
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("CORE.md directories are reported as validation errors instead of fatal reads", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      const core = join(b, "lang", "rust", "CORE.md");
++      rmSync(core);
++      mkdirSync(core);
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("CORE.md: must be a regular file");
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("symlinked references are rejected instead of bypassing content validation", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      const target = join(b, "..", "external.md");
++      const references = join(b, "lang", "rust", "references");
++      writeFileSync(target, "Use Claude Code.\n");
++      mkdirSync(references, { recursive: true });
++      symlinkSync(target, join(references, "external.md"));
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain(
++        "brain/lang/rust/references/external.md: symlinks are not allowed under brain/"
++      );
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("missing CORE.md is reported when another card anchors brain discovery", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      rmSync(join(b, "lang", "rust", "CORE.md"));
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("lang/rust/CORE.md: missing required file");
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("non-directory card paths are reported instead of ignored", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      writeFileSync(join(b, "lang", "not-a-card"), "plain file\n");
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("lang/not-a-card: card must be a directory");
++    } finally {
++      tearDown();
++    }
++  });
++
+   test("validators dir on non-review/methodology card rejected", () => {
+     const { brainDir, tearDown } = cloneFixture((b) => {
+       const dir = join(b, "lang", "csharp", "validators");
+@@ -435,6 +550,25 @@ describe("runValidate — broken cards", () => {
+     }
+   });
+ 
++  test("protocol structural validation reports all missing components", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      const protocol = join(b, "protocol", "finding");
++      rmSync(join(protocol, "schema.json"));
++      rmSync(join(protocol, "validator.ts"));
++      rmSync(join(protocol, "examples"), { recursive: true });
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("missing schema.json");
++      expect(stderr).toContain("missing validator.ts");
++      expect(stderr).toContain("examples/valid must contain at least one");
++      expect(stderr).toContain("examples/invalid must contain at least one");
++    } finally {
++      tearDown();
++    }
++  });
++
+   test("draft 2020-12 schemas validate without crashing", () => {
+     const { brainDir, tearDown } = cloneFixture((b) => {
+       writeFileSync(
+diff --git a/biome.jsonc b/biome.jsonc
+index 6c5b311..8c14687 100644
+--- a/biome.jsonc
++++ b/biome.jsonc
+@@ -31,5 +31,5 @@
+       "trailingCommas": "es5"
+     }
+   },
+-  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json"
+-}
+\ No newline at end of file
++  "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json"
++}
+diff --git a/bun.lock b/bun.lock
+index de0a0fe..f335ce2 100644
+--- a/bun.lock
++++ b/bun.lock
+@@ -6,35 +6,35 @@
+       "name": "tagen",
+       "dependencies": {
+         "ajv": "^8.20.0",
+-        "yaml": "^2.8.0",
++        "yaml": "^2.9.0",
+       },
+       "devDependencies": {
+-        "@biomejs/biome": "^2.4.8",
++        "@biomejs/biome": "^2.5.0",
+         "@questi0nm4rk/feats": "^1.0.1",
+-        "@typescript/native-preview": "latest",
+-        "bun-types": "latest",
+-        "typescript": "^6.0.2",
++        "@typescript/native-preview": "^7.0.0-dev.20260619.1",
++        "bun-types": "^1.3.14",
++        "typescript": "^6.0.3",
+       },
+     },
+   },
+   "packages": {
+-    "@biomejs/biome": ["@biomejs/biome@2.4.10", "", { "optionalDependencies": { "@biomejs/cli-darwin-arm64": "2.4.10", "@biomejs/cli-darwin-x64": "2.4.10", "@biomejs/cli-linux-arm64": "2.4.10", "@biomejs/cli-linux-arm64-musl": "2.4.10", "@biomejs/cli-linux-x64": "2.4.10", "@biomejs/cli-linux-x64-musl": "2.4.10", "@biomejs/cli-win32-arm64": "2.4.10", "@biomejs/cli-win32-x64": "2.4.10" }, "bin": { "biome": "bin/biome" } }, "sha512-xxA3AphFQ1geij4JTHXv4EeSTda1IFn22ye9LdyVPoJU19fNVl0uzfEuhsfQ4Yue/0FaLs2/ccVi4UDiE7R30w=="],
++    "@biomejs/biome": ["@biomejs/biome@2.5.0", "", { "optionalDependencies": { "@biomejs/cli-darwin-arm64": "2.5.0", "@biomejs/cli-darwin-x64": "2.5.0", "@biomejs/cli-linux-arm64": "2.5.0", "@biomejs/cli-linux-arm64-musl": "2.5.0", "@biomejs/cli-linux-x64": "2.5.0", "@biomejs/cli-linux-x64-musl": "2.5.0", "@biomejs/cli-win32-arm64": "2.5.0", "@biomejs/cli-win32-x64": "2.5.0" }, "bin": { "biome": "bin/biome" } }, "sha512-4kURkd9hAPrdDM3C9n82ycYgx8hvQcW6MjKTEejruj8rK0N8P3OPpdy8BvI8kt3KWY4ycF5XtDOrktetEfhfuw=="],
+ 
+-    "@biomejs/cli-darwin-arm64": ["@biomejs/cli-darwin-arm64@2.4.10", "", { "os": "darwin", "cpu": "arm64" }, "sha512-vuzzI1cWqDVzOMIkYyHbKqp+AkQq4K7k+UCXWpkYcY/HDn1UxdsbsfgtVpa40shem8Kax4TLDLlx8kMAecgqiw=="],
++    "@biomejs/cli-darwin-arm64": ["@biomejs/cli-darwin-arm64@2.5.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-Mn3Fwi3SA5fgmfCPqmzpWF2DLZnms3BVAhM088nTnGrTZmHS3wwIjcoZPqpXeNgd3DrrLH6xp8vTLIBuJoZiXw=="],
+ 
+-    "@biomejs/cli-darwin-x64": ["@biomejs/cli-darwin-x64@2.4.10", "", { "os": "darwin", "cpu": "x64" }, "sha512-14fzASRo+BPotwp7nWULy2W5xeUyFnTaq1V13Etrrxkrih+ez/2QfgFm5Ehtf5vSjtgx/IJycMMpn5kPd5ZNaA=="],
++    "@biomejs/cli-darwin-x64": ["@biomejs/cli-darwin-x64@2.5.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-rg3VPL5P8mYro6pqlXYXuJWph21slVp3SZtAqWSrkZs40d2gTzYmHF8E/X1iTID25btmNKltNDJ926sqVBp7DQ=="],
+ 
+-    "@biomejs/cli-linux-arm64": ["@biomejs/cli-linux-arm64@2.4.10", "", { "os": "linux", "cpu": "arm64" }, "sha512-7MH1CMW5uuxQ/s7FLST63qF8B3Hgu2HRdZ7tA1X1+mk+St4JOuIrqdhIBnnyqeyWJNI+Bww7Es5QZ0wIc1Cmkw=="],
++    "@biomejs/cli-linux-arm64": ["@biomejs/cli-linux-arm64@2.5.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-tl+LW8fdD96/xdeWtWwc82LIOc5CoY7N2AsogLTp5R4ECErYt+8Jl/N68ezN9vzSiqPTxw6vjcihoLPYKZHrlw=="],
+ 
+-    "@biomejs/cli-linux-arm64-musl": ["@biomejs/cli-linux-arm64-musl@2.4.10", "", { "os": "linux", "cpu": "arm64" }, "sha512-WrJY6UuiSD/Dh+nwK2qOTu8kdMDlLV3dLMmychIghHPAysWFq1/DGC1pVZx8POE3ZkzKR3PUUnVrtZfMfaJjyQ=="],
++    "@biomejs/cli-linux-arm64-musl": ["@biomejs/cli-linux-arm64-musl@2.5.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-vQdM4oSGaf7ZNeGO9w5+Y8SBtyser9M6znxYbm7Ec8wInxJu1WiKxFYZW5Auj2d80bcVvefuGGRxoFOE0eee8g=="],
+ 
+-    "@biomejs/cli-linux-x64": ["@biomejs/cli-linux-x64@2.4.10", "", { "os": "linux", "cpu": "x64" }, "sha512-tZLvEEi2u9Xu1zAqRjTcpIDGVtldigVvzug2fTuPG0ME/g8/mXpRPcNgLB22bGn6FvLJpHHnqLnwliOu8xjYrg=="],
++    "@biomejs/cli-linux-x64": ["@biomejs/cli-linux-x64@2.5.0", "", { "os": "linux", "cpu": "x64" }, "sha512-zpEGf4RQbFEh8Vt7OmavLyyOzRbtcE9osCqrS1kfvt8jDvxwhKXLSf7n0ebr/ov0RJ9ssP+lhs6C8a9WwFvrQA=="],
+ 
+-    "@biomejs/cli-linux-x64-musl": ["@biomejs/cli-linux-x64-musl@2.4.10", "", { "os": "linux", "cpu": "x64" }, "sha512-kDTi3pI6PBN6CiczsWYOyP2zk0IJI08EWEQyDMQWW221rPaaEz6FvjLhnU07KMzLv8q3qSuoB93ua6inSQ55Tw=="],
++    "@biomejs/cli-linux-x64-musl": ["@biomejs/cli-linux-x64-musl@2.5.0", "", { "os": "linux", "cpu": "x64" }, "sha512-+9hIcMngJ+yGUahXqZuZ8CoWKJE9SAZsFsM3QDvXpNsLbXZ9lqVzgBhOk/jTSYkOA0GLP9eu3teukqpLUojHMg=="],
+ 
+-    "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.4.10", "", { "os": "win32", "cpu": "arm64" }, "sha512-umwQU6qPzH+ISTf/eHyJ/QoQnJs3V9Vpjz2OjZXe9MVBZ7prgGafMy7yYeRGnlmDAn87AKTF3Q6weLoMGpeqdQ=="],
++    "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.5.0", "", { "os": "win32", "cpu": "arm64" }, "sha512-jB0wAvTLI4itx5VidqVUejPQFhRUxiZ9l9FvZ26D5fl6t3qme+ZB4PD3bTSeL1vZ8NI2Rx/zj6H9zcESuGHKGw=="],
+ 
+-    "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.4.10", "", { "os": "win32", "cpu": "x64" }, "sha512-aW/JU5GuyH4uxMrNYpoC2kjaHlyJGLgIa3XkhPEZI0uKhZhJZU8BuEyJmvgzSPQNGozBwWjC972RaNdcJ9KyJg=="],
++    "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.0", "", { "os": "win32", "cpu": "x64" }, "sha512-VT/lF+GId+67j8aDfLkxdxNoVApsPSTbyAtB3jJq0IWTrY77WXfbPfpngxq0bA6JCEv/7k8C9qWjDRKRznDlyw=="],
+ 
+     "@cucumber/cucumber-expressions": ["@cucumber/cucumber-expressions@19.0.0", "", { "dependencies": { "regexp-match-indices": "1.0.2" } }, "sha512-4FKoOQh2Uf6F6/Ln+1OxuK8LkTg6PyAqekhf2Ix8zqV2M54sH+m7XNJNLhOFOAW/t9nxzRbw2CcvXbCLjcvHZg=="],
+ 
+@@ -46,25 +46,25 @@
+ 
+     "@types/node": ["@types/node@25.5.0", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw=="],
+ 
+-    "@typescript/native-preview": ["@typescript/native-preview@7.0.0-dev.20260330.1", "", { "optionalDependencies": { "@typescript/native-preview-darwin-arm64": "7.0.0-dev.20260330.1", "@typescript/native-preview-darwin-x64": "7.0.0-dev.20260330.1", "@typescript/native-preview-linux-arm": "7.0.0-dev.20260330.1", "@typescript/native-preview-linux-arm64": "7.0.0-dev.20260330.1", "@typescript/native-preview-linux-x64": "7.0.0-dev.20260330.1", "@typescript/native-preview-win32-arm64": "7.0.0-dev.20260330.1", "@typescript/native-preview-win32-x64": "7.0.0-dev.20260330.1" }, "bin": { "tsgo": "bin/tsgo.js" } }, "sha512-tyRn6/PAYpkN35bKz2RPfzV/QAACvle9EYlYyywn/p/qPI5yOBLka0zM/2dGKx+o5vHVQ1gr/iVrgW8w7Wqc8Q=="],
++    "@typescript/native-preview": ["@typescript/native-preview@7.0.0-dev.20260619.1", "", { "optionalDependencies": { "@typescript/native-preview-darwin-arm64": "7.0.0-dev.20260619.1", "@typescript/native-preview-darwin-x64": "7.0.0-dev.20260619.1", "@typescript/native-preview-linux-arm": "7.0.0-dev.20260619.1", "@typescript/native-preview-linux-arm64": "7.0.0-dev.20260619.1", "@typescript/native-preview-linux-x64": "7.0.0-dev.20260619.1", "@typescript/native-preview-win32-arm64": "7.0.0-dev.20260619.1", "@typescript/native-preview-win32-x64": "7.0.0-dev.20260619.1" }, "bin": { "tsgo": "bin/tsgo.js" } }, "sha512-YDmSiD6l+nikPoqrwDKn9wkCFUDFJCfkKcOKrYVycX5plwu6H03JWKyW1h1HjEfrMVw4Mq/Qk12VTsXJWP4TDQ=="],
+ 
+-    "@typescript/native-preview-darwin-arm64": ["@typescript/native-preview-darwin-arm64@7.0.0-dev.20260330.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-jX47OX4svh3/CzSDYd81+kELLP5r0+G7lFGiMAVUNpD+ZLmyh/nrkuuI643pGe8D0i9dTfg/aiZQq6d/00Feog=="],
++    "@typescript/native-preview-darwin-arm64": ["@typescript/native-preview-darwin-arm64@7.0.0-dev.20260619.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-i07qdTFQEBYotjg/Iy0GAfARSFyKAjXmP5BNPo6+QXGOp5hJNnmXSxGyhIlooqbDXluTQRhESEmzVAuvYryKCA=="],
+ 
+-    "@typescript/native-preview-darwin-x64": ["@typescript/native-preview-darwin-x64@7.0.0-dev.20260330.1", "", { "os": "darwin", "cpu": "x64" }, "sha512-JysPTOMnyje+LkdB3LR+Emnl7hJCvMzUVRcOVJyzmxWOMFNCYPWNK3wDdwuoS6jE5Hii9vInt/xtn3pc+kgb+A=="],
++    "@typescript/native-preview-darwin-x64": ["@typescript/native-preview-darwin-x64@7.0.0-dev.20260619.1", "", { "os": "darwin", "cpu": "x64" }, "sha512-WVetqm9ypzLv+b/8+SRYuO6bJDC4AaQmT/1EcYh8iP6y5vZl3h13iscJ+45eHc4Y3yMyoDHOivfOTyTIMH2Vrw=="],
+ 
+-    "@typescript/native-preview-linux-arm": ["@typescript/native-preview-linux-arm@7.0.0-dev.20260330.1", "", { "os": "linux", "cpu": "arm" }, "sha512-rVwd9ZgjR8Le6ItUD/p59LCOYdZbi4DZYavXAMzPPpaJCnmdHwOcJFWc61vricsQljRjVBnunQknHfYABZDq9Q=="],
++    "@typescript/native-preview-linux-arm": ["@typescript/native-preview-linux-arm@7.0.0-dev.20260619.1", "", { "os": "linux", "cpu": "arm" }, "sha512-mqUzZ9htNWH0su9+A5QqnHJ25hQ+E8Cq5qOOmfdQjiCQnPT69HQZ9MiUozQc1qk0i9/UaXouYDK48Pe0oUvUOw=="],
+ 
+-    "@typescript/native-preview-linux-arm64": ["@typescript/native-preview-linux-arm64@7.0.0-dev.20260330.1", "", { "os": "linux", "cpu": "arm64" }, "sha512-9zlw4ENr6HAUNO+OiWuoQpWUGk4lkqb8NUyXDvTqtlgZGvjyePNVy8OW7KlPuPtCaQS3btV7w4h5X1wlTm2bFA=="],
++    "@typescript/native-preview-linux-arm64": ["@typescript/native-preview-linux-arm64@7.0.0-dev.20260619.1", "", { "os": "linux", "cpu": "arm64" }, "sha512-peEnXecjZsnsW24GutRasmZlIgRLbyXPoR0inMkzXT1h7/+Ns5tM8RPnuxelXoC10dg4Ajo8I9BlUAgX45LwEQ=="],
+ 
+-    "@typescript/native-preview-linux-x64": ["@typescript/native-preview-linux-x64@7.0.0-dev.20260330.1", "", { "os": "linux", "cpu": "x64" }, "sha512-7cB4e12e61xaXgJu6N9rMP+6qdkODVsW8zGjVS5a+cobBCsJSdMnlshfitlL9a+BYWe9HseMqPnLcsaE+t22CQ=="],
++    "@typescript/native-preview-linux-x64": ["@typescript/native-preview-linux-x64@7.0.0-dev.20260619.1", "", { "os": "linux", "cpu": "x64" }, "sha512-vZhIHvtpQE4ZICMIzIrOVOl/YYOLJjA91CsJMyetNNzvuQCCtll7CWUsS6Sp1IdRqJdwM6seJrdDEAtWkEMFkA=="],
+ 
+-    "@typescript/native-preview-win32-arm64": ["@typescript/native-preview-win32-arm64@7.0.0-dev.20260330.1", "", { "os": "win32", "cpu": "arm64" }, "sha512-4wv/FX9F5oAQhzjqwL8KN4O5xgciBy5pT2yLP45xcQahxFUoPnQeF9Pz2x/jwXZSmuh8E1DQWX9evSVGA1MV2A=="],
++    "@typescript/native-preview-win32-arm64": ["@typescript/native-preview-win32-arm64@7.0.0-dev.20260619.1", "", { "os": "win32", "cpu": "arm64" }, "sha512-pRdZDV9Q3IzBKOi5WrIaEnlkVLB0w3zVj2/BliPV/oQ8r8N+4LmSCuyy8PbL5bMw8SznTlmiIfv5gvoEx2SpEw=="],
+ 
+-    "@typescript/native-preview-win32-x64": ["@typescript/native-preview-win32-x64@7.0.0-dev.20260330.1", "", { "os": "win32", "cpu": "x64" }, "sha512-zKDOG/nq1yTx3cjfc19VFO+TYK2+03Wc17pGdD+X+dWTj15LZ2PKk3s4OtT2b8siTcAUn7zmwLsMCWPYO7xXQw=="],
++    "@typescript/native-preview-win32-x64": ["@typescript/native-preview-win32-x64@7.0.0-dev.20260619.1", "", { "os": "win32", "cpu": "x64" }, "sha512-sOvPE+lA/+SU/cnva+MXA1oq70HO0lLajsj9ZA10T1CN1PUGgaC1Zw7V0objTJsZ9ri6I3Ldp+Fh4Onz3mLDXw=="],
+ 
+     "ajv": ["ajv@8.20.0", "", { "dependencies": { "fast-deep-equal": "^3.1.3", "fast-uri": "^3.0.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2" } }, "sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA=="],
+ 
+-    "bun-types": ["bun-types@1.3.11", "", { "dependencies": { "@types/node": "*" } }, "sha512-1KGPpoxQWl9f6wcZh57LvrPIInQMn2TQ7jsgxqpRzg+l0QPOFvJVH7HmvHo/AiPgwXy+/Thf6Ov3EdVn1vOabg=="],
++    "bun-types": ["bun-types@1.3.14", "", { "dependencies": { "@types/node": "*" } }, "sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ=="],
+ 
+     "class-transformer": ["class-transformer@0.5.1", "", {}, "sha512-SQa1Ws6hUbfC98vKGxZH3KFY0Y1lm5Zm0SY8XX9zbK7FJCyVEac3ATW0RIpwzW+oOfmHE5PMPufDG9hCfoEOMw=="],
+ 
+@@ -84,12 +84,14 @@
+ 
+     "smol-toml": ["smol-toml@1.6.1", "", {}, "sha512-dWUG8F5sIIARXih1DTaQAX4SsiTXhInKf1buxdY9DIg4ZYPZK5nGM1VRIYmEbDbsHt7USo99xSLFu5Q1IqTmsg=="],
+ 
+-    "typescript": ["typescript@6.0.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-bGdAIrZ0wiGDo5l8c++HWtbaNCWTS4UTv7RaTH/ThVIgjkveJt83m74bBHMJkuCbslY8ixgLBVZJIOiQlQTjfQ=="],
++    "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
+ 
+     "undici-types": ["undici-types@7.18.2", "", {}, "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w=="],
+ 
+-    "yaml": ["yaml@2.8.3", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-AvbaCLOO2Otw/lW5bmh9d/WEdcDFdQp2Z2ZUH3pX9U2ihyUY0nvLv7J6TrWowklRGPYbB/IuIMfYgxaCPg5Bpg=="],
++    "yaml": ["yaml@2.9.0", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA=="],
+ 
+     "@cucumber/gherkin/@cucumber/messages": ["@cucumber/messages@31.2.0", "", { "dependencies": { "class-transformer": "0.5.1", "reflect-metadata": "0.2.2" } }, "sha512-3urzBNCwmU/YKrKR0b3XdioFcOFNuxlLwEImsxeP8rXnweLs+Ky04QURcbKpFom3T6a6v9zVioLCfHUuSQ72pg=="],
++
++    "@questi0nm4rk/feats/yaml": ["yaml@2.8.3", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-AvbaCLOO2Otw/lW5bmh9d/WEdcDFdQp2Z2ZUH3pX9U2ihyUY0nvLv7J6TrWowklRGPYbB/IuIMfYgxaCPg5Bpg=="],
+   }
+ }
+diff --git a/docs/plans/review-hardening-command-descriptors.md b/docs/plans/review-hardening-command-descriptors.md
+new file mode 100644
+index 0000000..88133a2
+--- /dev/null
++++ b/docs/plans/review-hardening-command-descriptors.md
+@@ -0,0 +1,212 @@
++# Review Hardening and Typed Command Descriptors
++
++## Current State
++
++- Branch: `fix/review-hardening`
++- Base: merged harness-agnostic `main`
++- Do not touch or stage `.claude/worktrees/feat-tagen-root-override/`.
++- Review hardening and the typed command-descriptor refactor are implemented.
++- Full verification before delivery:
++  - 166 tests passed
++  - TypeScript 6.0.3 `tsc --noEmit` passed
++  - TypeScript 7 native preview `tsgo --noEmit` passed
++  - Biome passed across `src/`, `__tests__/`, `features/`, and `scripts/`
++  - standalone and npm bundles printed `3.0.0`
++  - codespell, markdownlint, publint, doc-count audit, and npm pack passed
++  - extracted package binary and validator-runtime exports passed
++
++## Implemented
++
++- Embedded package version so the compiled binary no longer reads
++  `/$bunfs/package.json`.
++- `tagen add` now serializes frontmatter with the YAML library.
++- Added CRLF frontmatter support.
++- Reject symlinks anywhere under `brain/`.
++- Report missing/non-file `CORE.md` and non-directory card entries.
++- Scan harness leaks in large files; allowance prefixes now respect path
++  boundaries.
++- Normalize manifest paths to `/`.
++- Make alias collision detection case-insensitive.
++- Report all missing protocol components before returning.
++- Validate JSON Schema input as `unknown` before compiling.
++- Reject unknown/unsupported CLI flags and ignored positional arguments.
++- Block composition when `requires:` names a nonexistent type.
++- Block `list`/`get`/`add` on malformed catalog loading.
++- Added strict compiler options and current dependencies.
++- Added shared unknown-error handling.
++
++## Command Descriptor Refactor
++
++Replace the centralized command switch and command-name comparisons in
++`src/main.ts` with typed command descriptors.
++
++### Target Structure
++
++```text
++src/
++├── cli/
++│   ├── args.ts       # raw argv parsing only
++│   ├── command.ts    # descriptor/context types
++│   └── errors.ts     # CLI failure helpers
++├── commands/
++│   ├── index.ts      # typed descriptor registry
++│   ├── add.ts
++│   ├── get.ts
++│   ├── list.ts
++│   └── validate.ts
++└── main.ts           # globals, descriptor lookup, context load, execute
++```
++
++### Descriptor Contract
++
++Use a discriminated generic descriptor. Exact naming may vary, but preserve
++these responsibilities:
++
++```ts
++type CatalogPolicy = "clean" | "diagnostic";
++type PositionalPolicy = "allow" | "forbid";
++
++interface ValueFlag<Name extends string> {
++  readonly name: Name;
++  readonly kind: "value";
++  readonly repeatable: boolean;
++}
++
++interface BooleanFlag<Name extends string> {
++  readonly name: Name;
++  readonly kind: "boolean";
++}
++
++interface CommandDescriptor<Name extends string, Options> {
++  readonly name: Name;
++  readonly summary: string;
++  readonly flags: readonly (ValueFlag<string> | BooleanFlag<string>)[];
++  readonly positional: PositionalPolicy;
++  readonly catalog: CatalogPolicy;
++  decode(args: ParsedCommandArgs): Options;
++  execute(context: CommandContext, options: Options): void | Promise<void>;
++}
++```
++
++Improve the generics if useful, but do not build a framework. The goal is:
++
++- adding a command requires adding one descriptor and one registry entry;
++- each command owns its accepted flags and option decoding;
++- `main.ts` never compares command names;
++- `main.ts` has no command switch;
++- raw strings exist only at the argv/parser boundary;
++- descriptor option types make invalid execution states unrepresentable.
++
++### Per-Command Ownership
++
++- `list.ts`
++  - flags: `--type` value, `--aliases` boolean, `--json` boolean
++  - positional: forbid
++  - catalog: clean
++  - decoded options: existing `ListOptions`
++
++- `get.ts`
++  - flags: repeatable `--type`, `--name`, `--pin`; `--json`
++  - positional: allow
++  - catalog: clean
++  - move `buildComposeQuery` here
++
++- `validate.ts`
++  - flag: `--verbose`
++  - positional: forbid
++  - catalog: diagnostic
++  - malformed cards must be passed through for exhaustive reporting
++
++- `add.ts`
++  - no flags
++  - positional: forbid
++  - catalog: clean
++  - descriptor derives `knownTypes` and calls existing `runAdd`
++
++### Registry
++
++`commands/index.ts` should export a readonly tuple or `Map` built from the
++descriptors. Derive the command-name union from the descriptor tuple; do not
++repeat a handwritten command-name union.
++
++### Main
++
++`main.ts` should only:
++
++1. Handle no args / global help.
++2. Handle global version.
++3. Resolve a descriptor from the registry.
++4. Parse remaining argv using that descriptor's flag definitions.
++5. Load the catalog once.
++6. Enforce descriptor `catalog` policy generically.
++7. Decode options through the descriptor.
++8. Execute the descriptor.
++
++Help output should be generated from descriptor metadata where practical.
++Avoid moving the existing hardcoded help into another centralized table.
++
++## Tests to Add or Update
++
++- Parser unit tests:
++  - unknown option
++  - missing value
++  - repeated non-repeatable flag
++  - repeated repeatable flag
++  - forbidden positional argument
++- Registry test:
++  - command names are unique
++  - every command contributes help metadata
++- Existing CLI behavior remains unchanged.
++- Existing malformed-catalog `list` test remains green.
++- Add equivalent malformed-catalog coverage for `get` or test the generic
++  clean-catalog policy directly.
++- Verify `validate` still receives malformed catalog state and reports all
++  violations.
++
++## Type and Minimality Constraints
++
++- Keep `strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`,
++  `isolatedModules`, `erasableSyntaxOnly`, unused checks, and both compilers.
++- No `any`.
++- Avoid `as` assertions except the public generic `readPayload<T>()` boundary.
++- Prefer `satisfies` and const tuples to duplicated string unions.
++- No classes, decorators, dependency injection, or command base class.
++- Do not introduce a third-party CLI parser.
++- Keep command implementations callable directly by existing unit tests.
++- Split only by responsibility; do not create one-line wrapper modules.
++
++## Final Audit
++
++After the descriptor refactor:
++
++```bash
++bun run prepublishOnly
++bun run lint
++bun run build
++./bin/tagen --version
++codespell --skip='*.lock,bin/*,node_modules' .
++git ls-files '*.md' | xargs bunx markdownlint-cli2
++bunx publint
++npm pack --dry-run --json --cache /tmp/tagen-npm-cache
++git diff --check
++```
++
++Also extract the package tarball and verify:
++
++```bash
++<extracted>/package/bin/tagen.js --version
++bun -e 'const m = await import(process.argv[1]); console.log(Object.keys(m))' \
++  <extracted>/package/src/validator-runtime.ts
++```
++
++Expected final test count is at least 157 plus command-parser/registry tests.
++
++## Delivery
++
++1. Review the complete diff for unnecessary abstractions.
++2. Commit on `fix/review-hardening`.
++3. Fetch and rebase onto current `origin/main`.
++4. Rerun the full verification.
++5. Push the branch.
++6. Open a PR summarizing confirmed bugs fixed and type/tooling hardening.
++7. Do not admin-merge unless explicitly authorized.
+diff --git a/docs/specs/SPEC-tagen.md b/docs/specs/SPEC-tagen.md
+index 6cb2add..06f5488 100644
+--- a/docs/specs/SPEC-tagen.md
++++ b/docs/specs/SPEC-tagen.md
+@@ -352,8 +352,9 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
+ | Rule | Error |
+ |------|-------|
+ | Card path is not a directory | `<path>: card must be a directory, not a file` |
+-| Missing `CORE.md` | `<type>/<name>: missing CORE.md` |
+-| `CORE.md` is not a file | `<type>/<name>/CORE.md: must be a file` |
++| Missing `CORE.md` | `<type>/<name>/CORE.md: missing required file` |
++| `CORE.md` is not a regular file | `<type>/<name>/CORE.md: must be a regular file` |
++| Symlink anywhere under `brain/` | `<path>: symlinks are not allowed under brain/` |
+ | `CORE.md` ≥ 300 lines (excluding frontmatter) | `<type>/<name>/CORE.md: exceeds 300 lines (got <N>); move overflow into references/` |
+ | Card dir name not lowercase kebab-case | `<type>/<name>: card name must match [a-z][a-z0-9-]*` |
+ | Type dir name not lowercase | `<type>: type name must match [a-z][a-z0-9-]*` |
+diff --git a/features/steps/shared.ts b/features/steps/shared.ts
+index 1ff832e..18a955a 100644
+--- a/features/steps/shared.ts
++++ b/features/steps/shared.ts
+@@ -14,9 +14,9 @@ export interface TaGenWorld extends World {
+   /** Working directory for the next runTagen invocation. */
+   cwd: string;
+   /** Result of the last CLI invocation. */
+-  result?: CLIResult;
++  result: CLIResult | undefined;
+   /** Cleanup callback set by "temporary brain" Givens; run in the After hook. */
+-  cleanup?: () => void;
++  cleanup: (() => void) | undefined;
+ }
+ 
+ const ROOT = join(import.meta.dir, "..", "..");
+diff --git a/package.json b/package.json
+index 7138e3c..b5efcb5 100644
+--- a/package.json
++++ b/package.json
+@@ -42,15 +42,16 @@
+   },
+   "files": [
+     "bin/tagen.js",
+-    "src/validator-runtime.ts"
++    "src/validator-runtime.ts",
++    "src/lib/errors.ts"
+   ],
+   "scripts": {
+     "build": "bun build src/main.ts --compile --outfile bin/tagen",
+     "build:npm": "bun build src/main.ts --target=bun --outfile bin/tagen.js && printf '#!/usr/bin/env bun\n' | cat - bin/tagen.js > /tmp/tagen-tmp-$$.js && mv /tmp/tagen-tmp-$$.js bin/tagen.js && chmod +x bin/tagen.js",
+     "test": "bun test",
+-    "typecheck": "tsgo --noEmit",
+-    "lint": "biome check src/ __tests__/",
+-    "lint:fix": "biome check --write src/ __tests__/",
++    "typecheck": "tsc --noEmit && tsgo --noEmit",
++    "lint": "biome check src/ __tests__/ features/ scripts/",
++    "lint:fix": "biome check --write src/ __tests__/ features/ scripts/",
+     "check:doc-counts": "bun scripts/check-doc-counts.ts",
+     "changelog": "git cliff -o CHANGELOG.md",
+     "changelog:unreleased": "git cliff --unreleased --prepend CHANGELOG.md",
+@@ -58,13 +59,13 @@
+   },
+   "dependencies": {
+     "ajv": "^8.20.0",
+-    "yaml": "^2.8.0"
++    "yaml": "^2.9.0"
+   },
+   "devDependencies": {
+-    "@biomejs/biome": "^2.4.8",
++    "@biomejs/biome": "^2.5.0",
+     "@questi0nm4rk/feats": "^1.0.1",
+-    "@typescript/native-preview": "latest",
+-    "bun-types": "latest",
+-    "typescript": "^6.0.2"
++    "@typescript/native-preview": "^7.0.0-dev.20260619.1",
++    "bun-types": "^1.3.14",
++    "typescript": "^6.0.3"
+   }
+ }
+diff --git a/scripts/check-doc-counts.ts b/scripts/check-doc-counts.ts
+index eec557b..df739cc 100644
+--- a/scripts/check-doc-counts.ts
++++ b/scripts/check-doc-counts.ts
+@@ -222,18 +222,24 @@ function runTestCount(): number | null {
+   return parseRanCount(combined);
+ }
+ 
+-interface PackageVersion {
+-  readonly version?: string;
+-}
+-
+ function readPackageVersion(): string | null {
+   const raw = readFile("package.json");
+   if (raw === null) {
+     return null;
+   }
+   try {
+-    const pkg = JSON.parse(raw) as PackageVersion;
+-    return pkg.version ?? null;
++    const pkg: unknown = JSON.parse(raw);
++    if (
++      pkg === null ||
++      typeof pkg !== "object" ||
++      Array.isArray(pkg) ||
++      !("version" in pkg) ||
++      typeof pkg.version !== "string"
++    ) {
++      process.stderr.write(`${SCRIPT}: package.json has no string version field\n`);
++      return null;
++    }
++    return pkg.version;
+   } catch (err) {
+     const msg = err instanceof Error ? err.message : String(err);
+     process.stderr.write(`${SCRIPT}: package.json parse failed: ${msg}\n`);
+diff --git a/src/cli/args.ts b/src/cli/args.ts
+new file mode 100644
+index 0000000..2ed6ab1
+--- /dev/null
++++ b/src/cli/args.ts
+@@ -0,0 +1,74 @@
++import type { CommandFlag, ParsedCommandArgs, PositionalPolicy } from "./command.ts";
++import { fail } from "./errors.ts";
++
++export interface CommandArgSpec {
++  readonly name: string;
++  readonly flags: readonly CommandFlag[];
++  readonly positional: PositionalPolicy;
++}
++
++export function parseCommandArgs(
++  argv: readonly string[],
++  command: CommandArgSpec,
++  knownFlagNames: ReadonlySet<string>
++): ParsedCommandArgs {
++  const positional: string[] = [];
++  const values = new Map<string, string[]>();
++  const booleans = new Set<string>();
++
++  for (let index = 0; index < argv.length; index++) {
++    const argument = argv[index];
++    if (argument === undefined) continue;
++
++    const flag = findFlag(command.flags, argument);
++    if (flag?.kind === "boolean") {
++      if (booleans.has(flag.name)) fail(`${flag.name} may not be repeated`);
++      booleans.add(flag.name);
++      continue;
++    }
++    if (flag?.kind === "value") {
++      const existing = values.get(flag.name);
++      if (!flag.repeatable && existing !== undefined) {
++        fail(`${flag.name} may not be repeated`);
++      }
++      const value = argv[index + 1];
++      if (value === undefined || value.startsWith("-")) {
++        fail(`${flag.name} requires a value`);
++      }
++      values.set(flag.name, [...(existing ?? []), value]);
++      index++;
++      continue;
++    }
++    if (argument.startsWith("-")) {
++      if (knownFlagNames.has(argument)) {
++        fail(`${argument} is not valid for '${command.name}'`);
++      }
++      fail(`unknown option: ${argument}`);
++    }
++    positional.push(argument);
++  }
++
++  if (command.positional === "forbid" && positional.length > 0) {
++    fail(`unexpected positional argument for '${command.name}': ${positional[0]}`);
++  }
++
++  return {
++    positional,
++    value(flag) {
++      return values.get(flag.name)?.[0];
++    },
++    values(flag) {
++      return values.get(flag.name) ?? [];
++    },
++    has(flag) {
++      return booleans.has(flag.name);
++    },
++  };
++}
++
++function findFlag(
++  flags: readonly CommandFlag[],
++  name: string
++): CommandFlag | undefined {
++  return flags.find((flag) => flag.name === name);
++}
+diff --git a/src/cli/command.ts b/src/cli/command.ts
+new file mode 100644
+index 0000000..7f99cbc
+--- /dev/null
++++ b/src/cli/command.ts
+@@ -0,0 +1,87 @@
++import type { LoadResult } from "../lib/catalog.ts";
++
++export type CatalogPolicy = "clean" | "diagnostic";
++export type PositionalPolicy = "allow" | "forbid";
++
++export interface ValueFlag<
++  Name extends string = string,
++  Repeatable extends boolean = boolean,
++> {
++  readonly name: Name;
++  readonly kind: "value";
++  readonly repeatable: Repeatable;
++  readonly usage: string;
++  readonly description: string;
++}
++
++export interface BooleanFlag<Name extends string = string> {
++  readonly name: Name;
++  readonly kind: "boolean";
++  readonly usage: string;
++  readonly description: string;
++}
++
++export type CommandFlag = ValueFlag | BooleanFlag;
++
++export interface ParsedCommandArgs {
++  readonly positional: readonly string[];
++  value<Name extends string>(flag: ValueFlag<Name, false>): string | undefined;
++  values<Name extends string>(flag: ValueFlag<Name, true>): readonly string[];
++  has<Name extends string>(flag: BooleanFlag<Name>): boolean;
++}
++
++export interface CommandContext extends LoadResult {
++  readonly brainDir: string;
++  readonly root: string;
++}
++
++interface CommandDefinition<Name extends string, Options> {
++  readonly name: Name;
++  readonly summary: string;
++  readonly flags: readonly CommandFlag[];
++  readonly positional: PositionalPolicy;
++  readonly positionalHelp?: readonly string[];
++  readonly catalog: CatalogPolicy;
++  decode(args: ParsedCommandArgs): Options;
++  execute(context: CommandContext, options: Options): void | Promise<void>;
++}
++
++export interface CommandDescriptor<Name extends string, Options>
++  extends CommandDefinition<Name, Options> {
++  run(context: CommandContext, args: ParsedCommandArgs): void | Promise<void>;
++}
++
++export function defineCommand<Name extends string, Options>(
++  definition: CommandDefinition<Name, Options>
++): CommandDescriptor<Name, Options> {
++  return {
++    ...definition,
++    run(context, args) {
++      return definition.execute(context, definition.decode(args));
++    },
++  };
++}
++
++export function valueFlag<Name extends string>(
++  name: Name,
++  usage: string,
++  description: string
++): ValueFlag<Name, false> {
++  return { name, kind: "value", repeatable: false, usage, description };
++}
++
++export function repeatableValueFlag<Name extends string>(
++  name: Name,
++  usage: string,
++  description: string
++): ValueFlag<Name, true> {
++  return { name, kind: "value", repeatable: true, usage, description };
++}
++
++export function booleanFlag<Name extends string>(
++  name: Name,
++  usage: string,
++  description: string
++): BooleanFlag<Name> {
++  return { name, kind: "boolean", usage, description };
++}
+diff --git a/src/cli/errors.ts b/src/cli/errors.ts
+new file mode 100644
+index 0000000..14ec559
+--- /dev/null
++++ b/src/cli/errors.ts
+@@ -0,0 +1,27 @@
++import type { LoadResult } from "../lib/catalog.ts";
++
++const CLI_FAILURE_NAME = "CliFailure";
++
++export function fail(message: string): never {
++  const error = new Error(message);
++  error.name = CLI_FAILURE_NAME;
++  throw error;
++}
++
++export function failCatalogLoad(result: LoadResult): never {
++  const messages = [...result.catalogErrors];
++  for (const [card, errors] of result.frontmatterErrors) {
++    for (const error of errors) messages.push(`${card}: ${error}`);
++  }
++  fail(messages.join("\n"));
++}
++
++export function isCliFailure(value: unknown): value is Error {
++  return value instanceof Error && value.name === CLI_FAILURE_NAME;
++}
++
++export function reportCliFailure(error: Error): void {
++  for (const message of error.message.split("\n")) {
++    process.stderr.write(`tagen: ${message}\n`);
++  }
++}
+diff --git a/src/commands/add.ts b/src/commands/add.ts
+index 3b96697..1725388 100644
+--- a/src/commands/add.ts
++++ b/src/commands/add.ts
+@@ -2,8 +2,12 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+ import { join } from "node:path";
+ import { createInterface } from "node:readline/promises";
+ import type { Readable, Writable } from "node:stream";
++import { stringify as stringifyYaml } from "yaml";
++import { defineCommand } from "../cli/command.ts";
++import { knownTypesFromCards } from "../lib/compose.ts";
+ import {
+   type Card,
++  type CardFrontmatter,
+   type CardType,
+   KEBAB_NAME,
+   SUBAGENT_HOST_TYPES,
+@@ -110,14 +114,14 @@ export interface ScaffoldArgs {
+ }
+ 
+ export function scaffoldCard(a: ScaffoldArgs): string {
+-  const lines: string[] = ["---"];
+-  lines.push(`description: "${a.description.replace(/"/g, '\\"')}"`);
+-  if (a.aliases.length > 0) lines.push(`aliases: [${a.aliases.join(", ")}]`);
+-  if (a.requires.length > 0) lines.push(`requires: [${a.requires.join(", ")}]`);
+-  if (a.uses.length > 0) lines.push(`uses: [${a.uses.join(", ")}]`);
+-  if (a.subagents.length > 0) lines.push(`subagents: [${a.subagents.join(", ")}]`);
+-  lines.push("---", "", `# ${a.name}`, "", a.description, "");
+-  return lines.join("\n");
++  const frontmatter: CardFrontmatter = { description: a.description };
++  if (a.aliases.length > 0) frontmatter.aliases = a.aliases;
++  if (a.requires.length > 0) frontmatter.requires = a.requires;
++  if (a.uses.length > 0) frontmatter.uses = a.uses;
++  if (a.subagents.length > 0) frontmatter.subagents = a.subagents;
++
++  const yaml = stringifyYaml(frontmatter).trimEnd();
++  return `---\n${yaml}\n---\n\n# ${a.name}\n\n${a.description}\n`;
+ }
+ 
+ async function ask(rl: RL, question: string): Promise<string> {
+@@ -137,3 +141,17 @@ function abort(msg: string): never {
+   process.stderr.write(`${msg}\n`);
+   process.exit(1);
+ }
++
++export const addCommand = defineCommand({
++  name: "add",
++  summary: "Scaffold a new card interactively (the only command that writes)",
++  flags: [],
++  positional: "forbid",
++  catalog: "clean",
++  decode() {
++    return undefined;
++  },
++  execute(context) {
++    return runAdd(context.cards, knownTypesFromCards(context.cards), context.brainDir);
++  },
++});
+diff --git a/src/commands/get.ts b/src/commands/get.ts
+index fc45eac..678dd33 100644
+--- a/src/commands/get.ts
++++ b/src/commands/get.ts
+@@ -1,11 +1,44 @@
++import {
++  booleanFlag,
++  defineCommand,
++  type ParsedCommandArgs,
++  repeatableValueFlag,
++} from "../cli/command.ts";
++import { fail } from "../cli/errors.ts";
+ import { type ComposeQuery, compose, knownTypesFromCards } from "../lib/compose.ts";
+-import type { Card } from "../lib/types.ts";
++import type { Card, CardId } from "../lib/types.ts";
+ import { runList } from "./list.ts";
+ 
++const TYPE_FLAG = repeatableValueFlag(
++  "--type",
++  "--type T",
++  "Select an explicit card type (paired with --name)"
++);
++const NAME_FLAG = repeatableValueFlag(
++  "--name",
++  "--name N",
++  "Select an explicit card name (paired with --type)"
++);
++const PIN_FLAG = repeatableValueFlag(
++  "--pin",
++  "--pin <type>=<name>",
++  "Force a card to fill a slot"
++);
++const JSON_FLAG = booleanFlag(
++  "--json",
++  "--json",
++  "Machine-readable manifest (default)"
++);
++
+ export interface GetOptions {
+   json: boolean;
+ }
+ 
++interface GetCommandOptions {
++  query: ComposeQuery;
++  output: GetOptions;
++}
++
+ /**
+  * Resolve a composition into a JSON manifest. Bare type-name positional args
+  * trigger a browse intent (delegated to `runList --type T`).
+@@ -56,3 +89,55 @@ export function runGet(
+   );
+   process.stdout.write("Use --json for the full manifest.\n");
+ }
++
++export function buildComposeQuery(args: ParsedCommandArgs): ComposeQuery {
++  const query: ComposeQuery = {
++    positional: [...args.positional],
++    explicit: [],
++    pins: new Map(),
++  };
++  const types = args.values(TYPE_FLAG);
++  const names = args.values(NAME_FLAG);
++  if (types.length !== names.length) {
++    fail("--type and --name must be paired");
++  }
++  for (let index = 0; index < types.length; index++) {
++    const type = types[index];
++    const name = names[index];
++    if (type === undefined || name === undefined) {
++      throw new Error("paired --type/--name arguments were not preserved");
++    }
++    const id: CardId = { type, name };
++    query.explicit.push(id);
++  }
++
++  for (const pin of args.values(PIN_FLAG)) {
++    const separator = pin.indexOf("=");
++    if (separator <= 0 || separator === pin.length - 1) {
++      fail(`invalid --pin '${pin}', expected <type>=<name>`);
++    }
++    query.pins.set(pin.slice(0, separator), pin.slice(separator + 1));
++  }
++  return query;
++}
++
++export const getCommand = defineCommand({
++  name: "get",
++  summary: "Resolve a composition into a JSON manifest (--json)",
++  flags: [TYPE_FLAG, NAME_FLAG, PIN_FLAG, JSON_FLAG],
++  positional: "allow",
++  positionalHelp: [
++    "<args>...        Positional, fuzzy-matched against canonical names + aliases",
++    "                 (min 3 chars). A bare type-name triggers browse intent.",
++  ],
++  catalog: "clean",
++  decode(args): GetCommandOptions {
++    return {
++      query: buildComposeQuery(args),
++      output: { json: args.has(JSON_FLAG) },
++    };
++  },
++  execute(context, options) {
++    runGet(context.cards, context.root, options.query, options.output);
++  },
++});
+diff --git a/src/commands/index.ts b/src/commands/index.ts
+new file mode 100644
+index 0000000..eafa039
+--- /dev/null
++++ b/src/commands/index.ts
+@@ -0,0 +1,17 @@
++import { addCommand } from "./add.ts";
++import { getCommand } from "./get.ts";
++import { listCommand } from "./list.ts";
++import { validateCommand } from "./validate.ts";
++
++export const commands = [validateCommand, listCommand, getCommand, addCommand] as const;
++
++export type CommandName = (typeof commands)[number]["name"];
++export type RegisteredCommand = (typeof commands)[number];
++
++export const knownFlagNames: ReadonlySet<string> = new Set(
++  commands.flatMap((command) => command.flags.map((flag) => flag.name))
++);
++
++export function findCommand(name: string): RegisteredCommand | undefined {
++  return commands.find((command) => command.name === name);
++}
+diff --git a/src/commands/list.ts b/src/commands/list.ts
+index 1ae400d..d424c7d 100644
+--- a/src/commands/list.ts
++++ b/src/commands/list.ts
+@@ -1,5 +1,14 @@
++import { booleanFlag, defineCommand, valueFlag } from "../cli/command.ts";
+ import { type Card, type CardType, cardKey } from "../lib/types.ts";
+ 
++const TYPE_FLAG = valueFlag("--type", "--type T", "Restrict to one type");
++const ALIASES_FLAG = booleanFlag(
++  "--aliases",
++  "--aliases",
++  "Include each card's aliases"
++);
++const JSON_FLAG = booleanFlag("--json", "--json", "Machine-readable output");
++
+ export interface ListOptions {
+   json: boolean;
+   /** Filter to a single type dir under brain/. */
+@@ -41,3 +50,22 @@ export function runList(cards: Card[], opts: ListOptions): void {
+     }
+   }
+ }
++
++export const listCommand = defineCommand({
++  name: "list",
++  summary: "List catalog cards as <type>/<name>",
++  flags: [TYPE_FLAG, ALIASES_FLAG, JSON_FLAG],
++  positional: "forbid",
++  catalog: "clean",
++  decode(args): ListOptions {
++    const type = args.value(TYPE_FLAG);
++    return {
++      json: args.has(JSON_FLAG),
++      aliases: args.has(ALIASES_FLAG),
++      ...(type === undefined ? {} : { type }),
++    };
++  },
++  execute(context, options) {
++    runList(context.cards, options);
++  },
++});
+diff --git a/src/commands/validate.ts b/src/commands/validate.ts
+index 55bf1fc..c076c72 100644
+--- a/src/commands/validate.ts
++++ b/src/commands/validate.ts
+@@ -1,9 +1,12 @@
+ import { existsSync, readFileSync, statSync } from "node:fs";
+-import Ajv, { type ValidateFunction } from "ajv";
++import { join } from "node:path";
++import Ajv, { type AnySchema, type ValidateFunction } from "ajv";
+ import Ajv2020 from "ajv/dist/2020.js";
++import { booleanFlag, defineCommand } from "../cli/command.ts";
+ import { loadAgnosticConfig } from "../lib/agnostic-config.ts";
+ import { findAliasCollisions } from "../lib/aliases.ts";
+ import { findUsesCycles, resolveUses } from "../lib/card-references.ts";
++import { errorMessage } from "../lib/errors.ts";
+ import { bodyLineCount } from "../lib/frontmatter.ts";
+ import { BUILT_IN_RULE_IDS, findHarnessLeaks } from "../lib/harness-guard.ts";
+ import {
+@@ -15,6 +18,8 @@ import {
+   SUBAGENT_HOST_TYPES,
+ } from "../lib/types.ts";
+ 
++const VERBOSE_FLAG = booleanFlag("--verbose", "--verbose", "Per-card per-rule trace");
++
+ export interface ValidateOptions {
+   verbose: boolean;
+ }
+@@ -26,6 +31,8 @@ export interface ValidationContext {
+   root: string;
+   /** Frontmatter parse errors keyed by `<type>/<name>`. */
+   frontmatterErrors: Map<string, string[]>;
++  /** Catalog-shape errors found before card parsing. */
++  catalogErrors: string[];
+ }
+ 
+ /**
+@@ -34,7 +41,7 @@ export interface ValidationContext {
+  * via the catalog loader.
+  */
+ export function runValidate(ctx: ValidationContext, opts: ValidateOptions): void {
+-  const violations: string[] = [];
++  const violations: string[] = [...ctx.catalogErrors];
+   const knownTypes = new Set(ctx.cards.map((c) => c.id.type));
+   const index = cardIndex(ctx.cards);
+ 
+@@ -55,7 +62,7 @@ export function runValidate(ctx: ValidationContext, opts: ValidateOptions): void
+   const configResult = loadAgnosticConfig(ctx.root, BUILT_IN_RULE_IDS);
+   violations.push(...configResult.errors);
+   if (configResult.errors.length === 0) {
+-    const brainDir = `${ctx.root}/brain`;
++    const brainDir = join(ctx.root, "brain");
+     for (const leak of findHarnessLeaks(brainDir, ctx.root, configResult.config)) {
+       violations.push(
+         `${leak.path}:${leak.line}: harness leak [${leak.ruleId}]: ${leak.token}`
+@@ -76,6 +83,20 @@ export function runValidate(ctx: ValidationContext, opts: ValidateOptions): void
+   process.exit(violations.length > 0 ? 1 : 0);
+ }
+ 
++export const validateCommand = defineCommand({
++  name: "validate",
++  summary: "Walk the tree and report every rule violation; exit non-zero on any",
++  flags: [VERBOSE_FLAG],
++  positional: "forbid",
++  catalog: "diagnostic",
++  decode(args): ValidateOptions {
++    return { verbose: args.has(VERBOSE_FLAG) };
++  },
++  execute(context, options) {
++    runValidate(context, options);
++  },
++});
++
+ function checkFilesystem(card: Card, violations: string[]): void {
+   if (!KEBAB_NAME.test(card.id.name)) {
+     violations.push(`${cardKey(card.id)}: card name must match [a-z][a-z0-9-]*`);
+@@ -136,10 +157,16 @@ function checkValidatorScope(card: Card, violations: string[]): void {
+ }
+ 
+ /** Pick the right ajv variant based on the schema's `$schema` URI. Default
+- * Ajv handles draft-04/06/07; Ajv2020 handles 2019-09 and 2020-12. The two
++ * Ajv handles draft-07; Ajv2020 handles 2019-09 and 2020-12. The two
+  * builds use disjoint keyword sets so we can't share a single instance. */
+-function compileSchema(schema: { $schema?: string }): ValidateFunction {
+-  const draft = schema.$schema ?? "";
++function compileSchema(schema: AnySchema): ValidateFunction {
++  const draft =
++    typeof schema === "object" &&
++    schema !== null &&
++    "$schema" in schema &&
++    typeof schema.$schema === "string"
++      ? schema.$schema
++      : "";
+   const Variant =
+     draft.includes("2020-12") || draft.includes("2019-09") ? Ajv2020 : Ajv;
+   return new Variant({ allErrors: true }).compile(schema);
+@@ -147,12 +174,12 @@ function compileSchema(schema: { $schema?: string }): ValidateFunction {
+ 
+ function checkProtocol(proto: Protocol, root: string, violations: string[]): void {
+   const tag = `protocol/${proto.id.name}`;
+-  const schemaAbs = `${root}/${proto.schemaPath}`;
+-  const validatorAbs = `${root}/${proto.validatorPath}`;
++  const schemaAbs = join(root, proto.schemaPath);
++  const validatorAbs = join(root, proto.validatorPath);
+ 
+-  if (!existsSync(schemaAbs)) {
++  const schemaExists = existsSync(schemaAbs);
++  if (!schemaExists) {
+     violations.push(`${tag}: missing schema.json`);
+-    return;
+   }
+   if (!existsSync(validatorAbs)) {
+     violations.push(`${tag}: missing validator.ts`);
+@@ -166,12 +193,17 @@ function checkProtocol(proto: Protocol, root: string, violations: string[]): voi
+   if (proto.invalidExamples.length === 0) {
+     violations.push(`${tag}: examples/invalid must contain at least one .json payload`);
+   }
++  if (!schemaExists) return;
+ 
+-  let schema: { $schema?: string };
++  let schema: unknown;
+   try {
+-    schema = JSON.parse(readFileSync(schemaAbs, "utf8")) as { $schema?: string };
++    schema = JSON.parse(readFileSync(schemaAbs, "utf8"));
+   } catch (err) {
+-    violations.push(`${tag}: schema.json parse error: ${(err as Error).message}`);
++    violations.push(`${tag}: schema.json parse error: ${errorMessage(err)}`);
++    return;
++  }
++  if (!isJsonSchema(schema)) {
++    violations.push(`${tag}: schema.json must contain an object or boolean schema`);
+     return;
+   }
+ 
+@@ -179,7 +211,7 @@ function checkProtocol(proto: Protocol, root: string, violations: string[]): voi
+   try {
+     validate = compileSchema(schema);
+   } catch (err) {
+-    violations.push(`${tag}: schema.json compile error: ${(err as Error).message}`);
++    violations.push(`${tag}: schema.json compile error: ${errorMessage(err)}`);
+     return;
+   }
+ 
+@@ -198,9 +230,9 @@ function checkExamples(
+   for (const ex of examples) {
+     let payload: unknown;
+     try {
+-      payload = JSON.parse(readFileSync(`${root}/${ex}`, "utf8"));
++      payload = JSON.parse(readFileSync(join(root, ex), "utf8"));
+     } catch (err) {
+-      violations.push(`${tag}: ${ex} parse error: ${(err as Error).message}`);
++      violations.push(`${tag}: ${ex} parse error: ${errorMessage(err)}`);
+       continue;
+     }
+     const passed = validate(payload);
+@@ -209,3 +241,10 @@ function checkExamples(
+       violations.push(`${tag}: ${ex} passes schema (should fail)`);
+   }
+ }
++
++function isJsonSchema(value: unknown): value is AnySchema {
++  return (
++    typeof value === "boolean" ||
++    (value !== null && typeof value === "object" && !Array.isArray(value))
++  );
++}
+diff --git a/src/lib/agnostic-config.ts b/src/lib/agnostic-config.ts
+index 7e83d63..a915ffc 100644
+--- a/src/lib/agnostic-config.ts
++++ b/src/lib/agnostic-config.ts
+@@ -1,5 +1,6 @@
+ import { existsSync, readFileSync } from "node:fs";
+ import { join } from "node:path";
++import { errorMessage, isRecord } from "./errors.ts";
+ 
+ export interface AdditionalTerm {
+   id: string;
+@@ -41,7 +42,7 @@ export function loadAgnosticConfig(
+   } catch (error) {
+     return {
+       config: empty,
+-      errors: [`${CONFIG_PATH.join("/")}: invalid JSON: ${messageOf(error)}`],
++      errors: [`${CONFIG_PATH.join("/")}: invalid JSON: ${errorMessage(error)}`],
+     };
+   }
+   if (!isRecord(raw)) {
+@@ -84,28 +85,27 @@ function parseTerms(
+       continue;
+     }
+     rejectUnknownKeys(item, TERM_KEYS, tag, errors);
+-    if (typeof item.id !== "string" || item.id.length === 0) {
++    const id = item.id;
++    const term = item.term;
++    const caseSensitive = item.caseSensitive;
++    if (typeof id !== "string" || id.length === 0) {
+       errors.push(`${tag}.id must be a non-empty string`);
+       continue;
+     }
+-    if (ids.has(item.id)) errors.push(`${tag}.id duplicates '${item.id}'`);
+-    if (reservedIds.has(item.id)) {
+-      errors.push(`${tag}.id conflicts with built-in rule '${item.id}'`);
++    if (ids.has(id)) errors.push(`${tag}.id duplicates '${id}'`);
++    if (reservedIds.has(id)) {
++      errors.push(`${tag}.id conflicts with built-in rule '${id}'`);
+     }
+-    ids.add(item.id);
+-    if (typeof item.term !== "string" || item.term.length === 0) {
++    ids.add(id);
++    if (typeof term !== "string" || term.length === 0) {
+       errors.push(`${tag}.term must be a non-empty string`);
+       continue;
+     }
+-    if (typeof item.caseSensitive !== "boolean") {
++    if (typeof caseSensitive !== "boolean") {
+       errors.push(`${tag}.caseSensitive must be a boolean`);
+       continue;
+     }
+-    out.push({
+-      id: item.id,
+-      term: item.term,
+-      caseSensitive: item.caseSensitive,
+-    });
++    out.push({ id, term, caseSensitive });
+   }
+   return out;
+ }
+@@ -129,6 +129,7 @@ function parseAllowances(
+     }
+     rejectUnknownKeys(item, ALLOW_KEYS, tag, errors);
+     const pathPrefix = item.pathPrefix;
++    const rules = item.rules;
+     if (
+       typeof pathPrefix !== "string" ||
+       !pathPrefix.startsWith("brain/") ||
+@@ -137,14 +138,14 @@ function parseAllowances(
+       errors.push(`${tag}.pathPrefix must stay under brain/`);
+       continue;
+     }
+-    if (!isStringArray(item.rules) || item.rules.length === 0) {
++    if (!isStringArray(rules) || rules.length === 0) {
+       errors.push(`${tag}.rules must be a non-empty string array`);
+       continue;
+     }
+-    for (const rule of item.rules) {
++    for (const rule of rules) {
+       if (!knownRuleIds.has(rule)) errors.push(`${tag}: unknown rule id '${rule}'`);
+     }
+-    out.push({ pathPrefix, rules: item.rules });
++    out.push({ pathPrefix, rules });
+   }
+   return out;
+ }
+@@ -160,14 +161,6 @@ function rejectUnknownKeys(
+   }
+ }
+ 
+-function isRecord(value: unknown): value is Record<string, unknown> {
+-  return value !== null && typeof value === "object" && !Array.isArray(value);
+-}
+-
+ function isStringArray(value: unknown): value is string[] {
+   return Array.isArray(value) && value.every((item) => typeof item === "string");
+ }
+-
+-function messageOf(error: unknown): string {
+-  return error instanceof Error ? error.message : String(error);
+-}
+diff --git a/src/lib/aliases.ts b/src/lib/aliases.ts
+index 05ac337..ab3ba58 100644
+--- a/src/lib/aliases.ts
++++ b/src/lib/aliases.ts
+@@ -11,24 +11,25 @@ import { type Card, type CardId, cardKey } from "./types.ts";
+ export function findAliasCollisions(cards: Card[]): string[] {
+   const errors: string[] = [];
+   const canonical = new Map<string, CardId>();
+-  for (const c of cards) canonical.set(c.id.name, c.id);
++  for (const c of cards) canonical.set(c.id.name.toLowerCase(), c.id);
+ 
+   const seen = new Map<string, CardId>();
+   for (const c of cards) {
+     for (const alias of c.frontmatter.aliases ?? []) {
+-      const collidingCanonical = canonical.get(alias);
++      const normalized = alias.toLowerCase();
++      const collidingCanonical = canonical.get(normalized);
+       if (collidingCanonical) {
+         errors.push(
+           `alias '${alias}' on ${cardKey(c.id)} collides with canonical name ${cardKey(collidingCanonical)}`
+         );
+       }
+-      const prior = seen.get(alias);
++      const prior = seen.get(normalized);
+       if (prior) {
+         errors.push(
+           `alias '${alias}' collides between ${cardKey(prior)} and ${cardKey(c.id)}`
+         );
+       } else {
+-        seen.set(alias, c.id);
++        seen.set(normalized, c.id);
+       }
+     }
+   }
+diff --git a/src/lib/catalog.ts b/src/lib/catalog.ts
+index 28a11d1..09c757f 100644
+--- a/src/lib/catalog.ts
++++ b/src/lib/catalog.ts
+@@ -1,5 +1,5 @@
+-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+-import { dirname, join, relative, resolve } from "node:path";
++import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
++import { dirname, join, relative, resolve, sep } from "node:path";
+ import { parseCore } from "./frontmatter.ts";
+ import type { Card, CardId, Protocol } from "./types.ts";
+ 
+@@ -14,6 +14,8 @@ export interface LoadResult {
+   protocols: Protocol[];
+   /** Per-card frontmatter parse errors keyed by `<type>/<name>`. */
+   frontmatterErrors: Map<string, string[]>;
++  /** Catalog-shape errors that prevent safely loading a card. */
++  catalogErrors: string[];
+ }
+ 
+ /**
+@@ -64,17 +66,45 @@ export function loadAllCards(brainDir: string): LoadResult {
+   const cards: Card[] = [];
+   const protocols: Protocol[] = [];
+   const frontmatterErrors = new Map<string, string[]>();
++  const brainStat = lstatSync(brainDir);
++  const catalogErrors = brainStat.isSymbolicLink()
++    ? ["brain: symlinks are not allowed under brain/"]
++    : findSymlinkErrors(brainDir, root);
++  if (brainStat.isSymbolicLink()) {
++    return { cards, protocols, frontmatterErrors, catalogErrors };
++  }
+ 
+   for (const type of readdirSync(brainDir).sort()) {
+     const typeDir = join(brainDir, type);
+-    if (!isDir(typeDir)) continue;
++    if (!isDir(typeDir)) {
++      if (!lstatSync(typeDir).isSymbolicLink()) {
++        catalogErrors.push(`${type}: type must be a directory`);
++      }
++      continue;
++    }
+     for (const name of readdirSync(typeDir).sort()) {
+       const cardDir = join(typeDir, name);
+-      if (!isDir(cardDir)) continue;
++      if (!isDir(cardDir)) {
++        if (!lstatSync(cardDir).isSymbolicLink()) {
++          catalogErrors.push(`${type}/${name}: card must be a directory`);
++        }
++        continue;
++      }
+       const corePath = join(cardDir, CORE_FILE);
+-      if (!existsSync(corePath)) continue;
+ 
+       const id: CardId = { type, name };
++      let coreStat: ReturnType<typeof lstatSync>;
++      try {
++        coreStat = lstatSync(corePath);
++      } catch {
++        catalogErrors.push(`${type}/${name}/CORE.md: missing required file`);
++        continue;
++      }
++      if (coreStat.isSymbolicLink()) continue;
++      if (!coreStat.isFile()) {
++        catalogErrors.push(`${type}/${name}/CORE.md: must be a regular file`);
++        continue;
++      }
+       const source = readFileSync(corePath, "utf8");
+       const parsed = parseCore(source, type);
+       if (parsed.errors.length > 0) {
+@@ -98,7 +128,20 @@ export function loadAllCards(brainDir: string): LoadResult {
+     }
+   }
+ 
+-  return { cards, protocols, frontmatterErrors };
++  return { cards, protocols, frontmatterErrors, catalogErrors };
++}
++
++function findSymlinkErrors(dir: string, root: string): string[] {
++  const errors: string[] = [];
++  for (const entry of readdirSync(dir, { withFileTypes: true })) {
++    const path = join(dir, entry.name);
++    if (entry.isSymbolicLink()) {
++      errors.push(`${rel(path, root)}: symlinks are not allowed under brain/`);
++      continue;
++    }
++    if (entry.isDirectory()) errors.push(...findSymlinkErrors(path, root));
++  }
++  return errors;
+ }
+ 
+ function toProtocol(card: Card, root: string): Protocol {
+@@ -125,7 +168,7 @@ function listFiles(dir: string, ext: string, root: string): string[] {
+ 
+ function isDir(p: string): boolean {
+   try {
+-    return statSync(p).isDirectory();
++    return lstatSync(p).isDirectory();
+   } catch {
+     return false;
+   }
+@@ -134,5 +177,5 @@ function isDir(p: string): boolean {
+ /** Root-relative form of an absolute path. Exported so commands and compose
+  * use one definition (manifest paths must all be relative to `root`). */
+ export function rel(absPath: string, root: string): string {
+-  return relative(root, absPath);
++  return relative(root, absPath).split(sep).join("/");
+ }
+diff --git a/src/lib/compose.ts b/src/lib/compose.ts
+index 69ce501..b58231c 100644
+--- a/src/lib/compose.ts
++++ b/src/lib/compose.ts
+@@ -115,6 +115,14 @@ export function compose(
+   const matchedSorted = expanded.cards.sort(byTypeName);
+ 
+   const requiredTypes = collectRequires(matchedSorted);
++  const unknownRequiredTypes = requiredTypes.filter((type) => !knownTypes.has(type));
++  if (unknownRequiredTypes.length > 0) {
++    return {
++      errors: unknownRequiredTypes.map((type) => `unknown type in requires: ${type}`),
++      browseTypes,
++      emptyMatch: false,
++    };
++  }
+   const slots: ResolvedSlot[] = [];
+   const filled: Record<CardType, FilledSlot> = {};
+   const fillerKeys = new Set<string>();
+diff --git a/src/lib/errors.ts b/src/lib/errors.ts
+new file mode 100644
+index 0000000..2940274
+--- /dev/null
++++ b/src/lib/errors.ts
+@@ -0,0 +1,7 @@
++export function errorMessage(value: unknown): string {
++  return value instanceof Error ? value.message : String(value);
++}
++
++export function isRecord(value: unknown): value is Record<string, unknown> {
++  return value !== null && typeof value === "object" && !Array.isArray(value);
++}
+diff --git a/src/lib/frontmatter.ts b/src/lib/frontmatter.ts
+index 2b8bcb2..c8232da 100644
+--- a/src/lib/frontmatter.ts
++++ b/src/lib/frontmatter.ts
+@@ -1,4 +1,5 @@
+ import { parse as parseYaml } from "yaml";
++import { isRecord } from "./errors.ts";
+ import type { CardFrontmatter, CardType } from "./types.ts";
+ 
+ /**
+@@ -39,7 +40,7 @@ export function parseCore(source: string, type: CardType): ParseResult {
+   const errors: string[] = [];
+   const empty: CardFrontmatter = { description: "" };
+ 
+-  const match = source.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
++  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
+   if (!match) {
+     errors.push("CORE.md missing YAML frontmatter");
+     return { frontmatter: empty, body: source, errors };
+@@ -57,12 +58,12 @@ export function parseCore(source: string, type: CardType): ParseResult {
+     return { frontmatter: empty, body, errors };
+   }
+ 
+-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
++  if (!isRecord(raw)) {
+     errors.push("CORE.md frontmatter must be a YAML mapping");
+     return { frontmatter: empty, body, errors };
+   }
+ 
+-  const fm = raw as Record<string, unknown>;
++  const fm = raw;
+   const allowed = new Set(allowedFor(type));
+   for (const key of Object.keys(fm)) {
+     if (!allowed.has(key)) {
+diff --git a/src/lib/harness-guard.ts b/src/lib/harness-guard.ts
+index 535b0c9..5ae7d6e 100644
+--- a/src/lib/harness-guard.ts
++++ b/src/lib/harness-guard.ts
+@@ -1,6 +1,7 @@
+-import { readdirSync, readFileSync, statSync } from "node:fs";
+-import { join, relative } from "node:path";
++import { readdirSync, readFileSync } from "node:fs";
++import { join } from "node:path";
+ import type { AgnosticGuardConfig } from "./agnostic-config.ts";
++import { rel } from "./catalog.ts";
+ 
+ interface GuardRule {
+   id: string;
+@@ -66,15 +67,15 @@ export function findHarnessLeaks(
+   const leaks: HarnessLeak[] = [];
+ 
+   for (const file of listTextFiles(brainDir)) {
+-    const rel = relative(root, file);
++    const relativePath = rel(file, root);
+     const lines = readFileSync(file, "utf8").split(/\r?\n/);
+     for (const [index, line] of lines.entries()) {
+       for (const rule of rules) {
+-        if (isAllowed(rel, rule.id, config)) continue;
++        if (isAllowed(relativePath, rule.id, config)) continue;
+         rule.pattern.lastIndex = 0;
+         for (const match of line.matchAll(rule.pattern)) {
+           leaks.push({
+-            path: rel,
++            path: relativePath,
+             line: index + 1,
+             ruleId: rule.id,
+             token: match[0].trim(),
+@@ -100,7 +101,6 @@ function listTextFiles(dir: string): string[] {
+       continue;
+     }
+     if (!entry.isFile() || !hasScannedExtension(entry.name)) continue;
+-    if (statSync(path).size > 1_000_000) continue;
+     out.push(path);
+   }
+   return out.sort();
+@@ -112,10 +112,11 @@ function hasScannedExtension(name: string): boolean {
+ }
+ 
+ function isAllowed(path: string, ruleId: string, config: AgnosticGuardConfig): boolean {
+-  return config.allow.some(
+-    (allowance) =>
+-      path.startsWith(allowance.pathPrefix) && allowance.rules.includes(ruleId)
+-  );
++  return config.allow.some((allowance) => {
++    const prefix = allowance.pathPrefix.replace(/\/+$/, "");
++    const pathMatches = path === prefix || path.startsWith(`${prefix}/`);
++    return pathMatches && allowance.rules.includes(ruleId);
++  });
+ }
+ 
+ function escapeRegExp(value: string): string {
+diff --git a/src/main.ts b/src/main.ts
+index 568edb0..0b6a323 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -1,170 +1,81 @@
+-import { readFileSync } from "node:fs";
+-import { join } from "node:path";
+-import { runAdd } from "./commands/add.ts";
+-import { runGet } from "./commands/get.ts";
+-import { runList } from "./commands/list.ts";
+-import { runValidate } from "./commands/validate.ts";
++import packageJson from "../package.json" with { type: "json" };
++import { parseCommandArgs } from "./cli/args.ts";
++import type { CommandDescriptor } from "./cli/command.ts";
++import { failCatalogLoad, isCliFailure, reportCliFailure } from "./cli/errors.ts";
++import { commands, findCommand, knownFlagNames } from "./commands/index.ts";
+ import { findBrainDir, loadAllCards, marketplaceRoot } from "./lib/catalog.ts";
+-import { type ComposeQuery, emptyQuery, knownTypesFromCards } from "./lib/compose.ts";
+-import type { CardId, CardType } from "./lib/types.ts";
++import { errorMessage } from "./lib/errors.ts";
+ 
+-const USAGE = `tagen — read-only CLI for a brain/ directory of typed cards
++function usage(): string {
++  const commandWidth = Math.max(...commands.map((command) => command.name.length));
++  const commandLines = commands
++    .map((command) => `  ${command.name.padEnd(commandWidth)}  ${command.summary}`)
++    .join("\n");
++  const commandHelp = commands.map(formatCommandHelp).join("\n");
++
++  return `tagen — read-only CLI for a brain/ directory of typed cards
+ 
+ Usage: tagen <command> [options]
+ 
+ Commands:
+-  list       List catalog cards as <type>/<name>
+-  validate   Walk the tree and report every rule violation; exit non-zero on any
+-  get        Resolve a composition into a JSON manifest (--json)
+-  add        Scaffold a new card interactively (the only command that writes)
+-
+-list:
+-  --type T         Restrict to one type
+-  --aliases        Include each card's aliases
+-  --json           Machine-readable output
+-
+-get:
+-  <args>...        Positional, fuzzy-matched against canonical names + aliases
+-                   (min 3 chars). A bare type-name (e.g. 'methodology') triggers
+-                   browse intent — equivalent to 'list --type T'.
+-  --type T --name N      Explicit (type, name) selection (paired, repeatable)
+-  --pin <type>=<name>    Force a card to fill a slot (repeatable)
+-  --json                 Machine-readable manifest (default)
+-
+-validate:
+-  --verbose         Per-card per-rule trace
++${commandLines}
+ 
++${commandHelp}
+ Common:
+   --help / -h       Show this help
+   --version / -V    Print version
+ `;
+-
+-const KNOWN_COMMANDS = new Set(["validate", "list", "get", "add"]);
+-
+-function readBundledVersion(): string {
+-  const pkgPath = join(import.meta.dir, "..", "package.json");
+-  const raw = readFileSync(pkgPath, "utf8");
+-  const pkg = JSON.parse(raw) as { version?: string };
+-  return pkg.version ?? "unknown";
+ }
+ 
+-interface ParsedArgs {
+-  positional: string[];
+-  flags: Map<string, string[]>;
+-  bools: Set<string>;
+-}
+-
+-const REPEAT_PAIR_FLAGS = new Set(["--type", "--name", "--pin"]);
+-const BOOLEAN_FLAGS = new Set(["--json", "--verbose", "--aliases"]);
+-
+-function parseArgs(args: string[]): ParsedArgs {
+-  const positional: string[] = [];
+-  const flags = new Map<string, string[]>();
+-  const bools = new Set<string>();
+-  for (let i = 0; i < args.length; i++) {
+-    const arg = args[i];
+-    if (arg === undefined) continue;
+-    if (BOOLEAN_FLAGS.has(arg)) {
+-      bools.add(arg);
+-      continue;
+-    }
+-    if (REPEAT_PAIR_FLAGS.has(arg)) {
+-      const v = args[i + 1];
+-      if (v === undefined) {
+-        process.stderr.write(`tagen: ${arg} requires a value\n`);
+-        process.exit(1);
+-      }
+-      const list = flags.get(arg) ?? [];
+-      list.push(v);
+-      flags.set(arg, list);
+-      i++;
+-      continue;
+-    }
+-    positional.push(arg);
++function formatCommandHelp(command: CommandDescriptor<string, unknown>): string {
++  const lines = [`${command.name}:`];
++  lines.push(...(command.positionalHelp ?? []).map((line) => `  ${line}`));
++  for (const flag of command.flags) {
++    lines.push(`  ${flag.usage.padEnd(20)} ${flag.description}`);
+   }
+-  return { positional, flags, bools };
+-}
+-
+-function buildComposeQuery(parsed: ParsedArgs): ComposeQuery {
+-  const q = emptyQuery();
+-  q.positional = parsed.positional;
+-
+-  const types = parsed.flags.get("--type") ?? [];
+-  const names = parsed.flags.get("--name") ?? [];
+-  if (types.length !== names.length) {
+-    process.stderr.write("tagen: --type and --name must be paired\n");
+-    process.exit(1);
+-  }
+-  for (let i = 0; i < types.length; i++) {
+-    const id: CardId = { type: types[i] as CardType, name: names[i] as string };
+-    q.explicit.push(id);
+-  }
+-
+-  for (const pin of parsed.flags.get("--pin") ?? []) {
+-    const eq = pin.indexOf("=");
+-    if (eq <= 0 || eq === pin.length - 1) {
+-      process.stderr.write(`tagen: invalid --pin '${pin}', expected <type>=<name>\n`);
+-      process.exit(1);
+-    }
+-    q.pins.set(pin.slice(0, eq), pin.slice(eq + 1));
+-  }
+-  return q;
++  return `${lines.join("\n")}\n`;
+ }
+ 
+ async function main(): Promise<void> {
+   const args = process.argv.slice(2);
+-  const command = args[0];
++  const commandName = args[0];
+ 
+-  if (!command || command === "--help" || command === "-h") {
+-    process.stdout.write(USAGE);
++  if (!commandName || commandName === "--help" || commandName === "-h") {
++    process.stdout.write(usage());
+     return;
+   }
+-  if (command === "--version" || command === "-V") {
+-    process.stdout.write(`${readBundledVersion()}\n`);
++  if (commandName === "--version" || commandName === "-V") {
++    process.stdout.write(`${packageJson.version}\n`);
+     return;
+   }
+-  if (!KNOWN_COMMANDS.has(command)) {
++
++  const command = findCommand(commandName);
++  if (!command) {
+     process.stderr.write(
+-      `Unknown command: ${command}\nRun 'tagen --help' for usage.\n`
++      `Unknown command: ${commandName}\nRun 'tagen --help' for usage.\n`
+     );
+     process.exit(1);
+   }
+ 
+-  const restArgs = args.slice(1);
+-  const parsed = parseArgs(restArgs);
+-  const json = parsed.bools.has("--json");
+-  const verbose = parsed.bools.has("--verbose");
+-  const aliases = parsed.bools.has("--aliases");
+-
++  const parsed = parseCommandArgs(args.slice(1), command, knownFlagNames);
+   const brainDir = findBrainDir();
+   const root = marketplaceRoot(brainDir);
+-  const { cards, protocols, frontmatterErrors } = loadAllCards(brainDir);
+-
+-  switch (command) {
+-    case "list": {
+-      const typeFilter = parsed.flags.get("--type")?.[0];
+-      runList(cards, { json, type: typeFilter, aliases });
+-      return;
+-    }
+-    case "validate": {
+-      runValidate({ cards, protocols, root, frontmatterErrors }, { verbose });
+-      return;
+-    }
+-    case "get": {
+-      const query = buildComposeQuery(parsed);
+-      runGet(cards, root, query, { json });
+-      return;
+-    }
+-    case "add": {
+-      const knownTypes = knownTypesFromCards(cards);
+-      await runAdd(cards, knownTypes, brainDir);
+-      return;
+-    }
++  const catalog = loadAllCards(brainDir);
++  if (
++    command.catalog === "clean" &&
++    (catalog.catalogErrors.length > 0 || catalog.frontmatterErrors.size > 0)
++  ) {
++    failCatalogLoad(catalog);
+   }
++
++  await command.run({ ...catalog, brainDir, root }, parsed);
+ }
+ 
+-main().catch((err: unknown) => {
+-  const msg = err instanceof Error ? err.message : String(err);
+-  process.stderr.write(`Fatal: ${msg}\n`);
++main().catch((error: unknown) => {
++  if (isCliFailure(error)) {
++    reportCliFailure(error);
++    process.exit(1);
++  }
++  process.stderr.write(`Fatal: ${errorMessage(error)}\n`);
+   process.exit(2);
+ });
+diff --git a/src/validator-runtime.ts b/src/validator-runtime.ts
+index 45dacd4..ae20a25 100644
+--- a/src/validator-runtime.ts
++++ b/src/validator-runtime.ts
+@@ -7,6 +7,7 @@
+  *
+  * Import as: `import { readPayload, pass, fail } from "@questi0nm4rk/tagen/validator-runtime";`
+  */
++import { errorMessage } from "./lib/errors.ts";
+ 
+ /** Read JSON payload from stdin. Exits 1 with a clear error if stdin is empty or invalid JSON. */
+ export async function readPayload<T = unknown>(): Promise<T> {
+@@ -22,9 +23,7 @@ export async function readPayload<T = unknown>(): Promise<T> {
+   try {
+     return JSON.parse(raw) as T;
+   } catch (err) {
+-    process.stderr.write(
+-      `validator: invalid JSON on stdin: ${(err as Error).message}\n`
+-    );
++    process.stderr.write(`validator: invalid JSON on stdin: ${errorMessage(err)}\n`);
+     process.exit(1);
+   }
+ }
+diff --git a/tsconfig.json b/tsconfig.json
+index 7c3a6d8..d108ce1 100644
+--- a/tsconfig.json
++++ b/tsconfig.json
+@@ -5,8 +5,23 @@
+     "moduleResolution": "bundler",
+     "types": ["bun-types"],
+     "allowImportingTsExtensions": true,
++    "resolveJsonModule": true,
++    "verbatimModuleSyntax": true,
++    "isolatedModules": true,
++    "erasableSyntaxOnly": true,
++    "moduleDetection": "force",
+     "noEmit": true,
+     "strict": true,
++    "exactOptionalPropertyTypes": true,
++    "noUncheckedIndexedAccess": true,
++    "noImplicitReturns": true,
++    "noFallthroughCasesInSwitch": true,
++    "noUnusedLocals": true,
++    "noUnusedParameters": true,
++    "noUncheckedSideEffectImports": true,
++    "forceConsistentCasingInFileNames": true,
++    "allowUnreachableCode": false,
++    "allowUnusedLabels": false,
+     "skipLibCheck": true
+   },
+   "include": ["src/**/*.ts", "__tests__/**/*.ts", "features/**/*.ts", "scripts/**/*.ts"]
