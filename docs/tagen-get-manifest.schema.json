@@ -19,7 +19,7 @@
   "properties": {
     "root": {
       "type": "string",
-      "description": "Absolute path of the marketplace dir. All other paths are relative to this."
+      "description": "Absolute path of the discovered or --root marketplace dir. All other paths are relative to this."
     },
     "modules": {
       "type": "array",

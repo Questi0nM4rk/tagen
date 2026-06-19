@@ -53,7 +53,8 @@ src/
 ├── cli/
 │   ├── args.ts             # raw argv parsing
 │   ├── command.ts          # typed descriptors and command context
-│   └── errors.ts           # CLI failure reporting
+│   ├── errors.ts           # CLI failure reporting
+│   └── root.ts             # shared --root catalog override flag
 ├── commands/
 │   ├── index.ts            # readonly descriptor registry
 │   ├── add.ts              # tagen add (interactive scaffold; only writer)

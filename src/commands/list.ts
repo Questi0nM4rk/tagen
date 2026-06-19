@@ -1,4 +1,5 @@
 import { booleanFlag, defineCommand, valueFlag } from "../cli/command.ts";
+import { ROOT_FLAG } from "../cli/root.ts";
 import { type Card, type CardType, cardKey } from "../lib/types.ts";
 
 const TYPE_FLAG = valueFlag("--type", "--type T", "Restrict to one type");
@@ -54,9 +55,9 @@ export function runList(cards: Card[], opts: ListOptions): void {
 export const listCommand = defineCommand({
   name: "list",
   summary: "List catalog cards as <type>/<name>",
-  flags: [TYPE_FLAG, ALIASES_FLAG, JSON_FLAG],
+  flags: [TYPE_FLAG, ALIASES_FLAG, JSON_FLAG, ROOT_FLAG],
   positional: "forbid",
-  catalog: "clean",
+  catalog: { policy: "clean", rootFlag: ROOT_FLAG },
   decode(args): ListOptions {
     const type = args.value(TYPE_FLAG);
     return {

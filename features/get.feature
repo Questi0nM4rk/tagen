@@ -47,3 +47,10 @@ Feature: tagen get — resolve a composition into a JSON manifest
     And manifest.modules contains a card methodology/tdd
     And the lang slot is filled by csharp
     And the test slot is filled by bun-test
+
+  Scenario: --root resolves brain from a cwd with no brain ancestor
+    Given a cwd with no brain ancestor
+    When I run tagen at the canonical fixture root with args get strict csharp --json
+    Then it exits 0
+    And stdout is valid JSON
+    And manifest.modules contains a card lang/csharp

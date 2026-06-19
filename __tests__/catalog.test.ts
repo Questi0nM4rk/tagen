@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findBrainDir, loadAllCards, marketplaceRoot } from "../src/lib/catalog.ts";
+import {
+  findBrainDir,
+  loadAllCards,
+  marketplaceRoot,
+  resolveBrainDir,
+} from "../src/lib/catalog.ts";
 
 const FIXTURES = join(import.meta.dir, "fixtures");
 const BRAIN = join(FIXTURES, "brain");
@@ -20,6 +25,28 @@ describe("findBrainDir", () => {
     const empty = mkdtempSync(join(tmpdir(), "tagen-no-brain-"));
     try {
       expect(() => findBrainDir(empty)).toThrow(/no brain\/ directory found/);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("resolveBrainDir", () => {
+  test("resolves <root>/brain exactly", () => {
+    expect(resolveBrainDir(FIXTURES)).toBe(BRAIN);
+  });
+
+  test("does not walk up from the explicit root", () => {
+    expect(() => resolveBrainDir(join(BRAIN, "lang", "csharp"))).toThrow(
+      /no brain\/ directory at/
+    );
+  });
+
+  test("reports the resolved root when brain is absent", () => {
+    const empty = mkdtempSync(join(tmpdir(), "tagen-root-no-brain-"));
+    try {
+      expect(() => resolveBrainDir(empty)).toThrow(empty);
+      expect(() => resolveBrainDir(empty)).toThrow(/--root/);
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }

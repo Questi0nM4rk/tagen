@@ -1,5 +1,6 @@
 import { expect } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { After, Before, Given, Then, When } from "@questi0nm4rk/feats";
 import {
@@ -29,6 +30,12 @@ Given<TaGenWorld>("the canonical fixture brain", (world: TaGenWorld) => {
   world.cwd = FIXTURES_DIR;
 });
 
+Given<TaGenWorld>("a cwd with no brain ancestor", (world: TaGenWorld) => {
+  const cwd = mkdtempSync(join(tmpdir(), "tagen-bdd-unrelated-"));
+  world.cwd = cwd;
+  world.cleanup = () => rmSync(cwd, { recursive: true, force: true });
+});
+
 Given<TaGenWorld>(
   "a temporary brain dir copied from the canonical fixture",
   (world: TaGenWorld) => {
@@ -51,6 +58,15 @@ When<TaGenWorld>(
   "I run tagen with args {}",
   async (world: TaGenWorld, rawArgs: unknown) => {
     const args = String(rawArgs).split(/\s+/).filter(Boolean);
+    world.result = await runTagen(args, world.cwd);
+  }
+);
+
+When<TaGenWorld>(
+  "I run tagen at the canonical fixture root with args {}",
+  async (world: TaGenWorld, rawArgs: unknown) => {
+    const args = String(rawArgs).split(/\s+/).filter(Boolean);
+    args.push("--root", FIXTURES_DIR);
     world.result = await runTagen(args, world.cwd);
   }
 );

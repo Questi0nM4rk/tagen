@@ -3,7 +3,12 @@ import { parseCommandArgs } from "./cli/args.ts";
 import type { CommandDescriptor } from "./cli/command.ts";
 import { failCatalogLoad, isCliFailure, reportCliFailure } from "./cli/errors.ts";
 import { commands, findCommand, knownFlagNames } from "./commands/index.ts";
-import { findBrainDir, loadAllCards, marketplaceRoot } from "./lib/catalog.ts";
+import {
+  findBrainDir,
+  loadAllCards,
+  marketplaceRoot,
+  resolveBrainDir,
+} from "./lib/catalog.ts";
 import { errorMessage } from "./lib/errors.ts";
 
 function usage(): string {
@@ -58,11 +63,15 @@ async function main(): Promise<void> {
   }
 
   const parsed = parseCommandArgs(args.slice(1), command, knownFlagNames);
-  const brainDir = findBrainDir();
+  const rootOverride = command.catalog.rootFlag
+    ? parsed.value(command.catalog.rootFlag)
+    : undefined;
+  const brainDir =
+    rootOverride === undefined ? findBrainDir() : resolveBrainDir(rootOverride);
   const root = marketplaceRoot(brainDir);
   const catalog = loadAllCards(brainDir);
   if (
-    command.catalog === "clean" &&
+    command.catalog.policy === "clean" &&
     (catalog.catalogErrors.length > 0 || catalog.frontmatterErrors.size > 0)
   ) {
     failCatalogLoad(catalog);
