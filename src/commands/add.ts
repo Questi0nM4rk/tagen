@@ -11,8 +11,6 @@ import {
 
 type RL = ReturnType<typeof createInterface>;
 
-const VALID_MODELS = ["haiku", "sonnet", "opus"] as const;
-
 export interface AddStreams {
   input?: Readable;
   output?: Writable;
@@ -69,15 +67,12 @@ export async function runAdd(
       );
     }
 
-    let model: (typeof VALID_MODELS)[number] | undefined;
+    let uses: string[] = [];
     if (type === "subagent") {
-      const answer = await ask(rl, `Model (${VALID_MODELS.join(" / ")}): `);
-      if (!isValidModel(answer)) {
-        return abort(
-          `Invalid model '${answer}': must be one of ${VALID_MODELS.join(", ")}`
-        );
-      }
-      model = answer;
+      uses = await askList(
+        rl,
+        "Uses (canonical type/name IDs, comma-separated, optional): "
+      );
     }
 
     const cardDir = join(brainDir, type, name);
@@ -94,8 +89,8 @@ export async function runAdd(
         description,
         aliases,
         requires,
+        uses,
         subagents,
-        model,
       })
     );
     process.stdout.write(`\nCreated: ${corePath}\n`);
@@ -110,8 +105,8 @@ export interface ScaffoldArgs {
   description: string;
   aliases: string[];
   requires: string[];
+  uses: string[];
   subagents: string[];
-  model?: "haiku" | "sonnet" | "opus";
 }
 
 export function scaffoldCard(a: ScaffoldArgs): string {
@@ -119,8 +114,8 @@ export function scaffoldCard(a: ScaffoldArgs): string {
   lines.push(`description: "${a.description.replace(/"/g, '\\"')}"`);
   if (a.aliases.length > 0) lines.push(`aliases: [${a.aliases.join(", ")}]`);
   if (a.requires.length > 0) lines.push(`requires: [${a.requires.join(", ")}]`);
+  if (a.uses.length > 0) lines.push(`uses: [${a.uses.join(", ")}]`);
   if (a.subagents.length > 0) lines.push(`subagents: [${a.subagents.join(", ")}]`);
-  if (a.model) lines.push(`model: ${a.model}`);
   lines.push("---", "", `# ${a.name}`, "", a.description, "");
   return lines.join("\n");
 }
@@ -136,10 +131,6 @@ async function askList(rl: RL, question: string): Promise<string[]> {
     .split(",")
     .map((v) => v.trim())
     .filter(Boolean);
-}
-
-function isValidModel(s: string): s is (typeof VALID_MODELS)[number] {
-  return (VALID_MODELS as readonly string[]).includes(s);
 }
 
 function abort(msg: string): never {

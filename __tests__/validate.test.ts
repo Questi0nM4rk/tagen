@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runValidate } from "../src/commands/validate.ts";
 import { findBrainDir, loadAllCards, marketplaceRoot } from "../src/lib/catalog.ts";
-import { knownTypesFromCards } from "../src/lib/compose.ts";
 
 const FIXTURES = join(import.meta.dir, "fixtures");
 const CLEAN_BRAIN = join(FIXTURES, "brain");
@@ -12,9 +11,7 @@ const CLEAN_BRAIN = join(FIXTURES, "brain");
 function makeContext(brainDir: string) {
   const root = marketplaceRoot(brainDir);
   const { cards, protocols, frontmatterErrors } = loadAllCards(brainDir);
-  const knownTypes = knownTypesFromCards(cards);
-  const index = new Map(cards.map((c) => [`${c.id.type}/${c.id.name}`, c] as const));
-  return { cards, protocols, root, frontmatterErrors, knownTypes, index };
+  return { cards, protocols, root, frontmatterErrors };
 }
 
 const ORIG_EXIT = process.exit;
@@ -126,7 +123,7 @@ describe("runValidate — broken cards", () => {
     }
   });
 
-  test("subagent missing model", () => {
+  test("subagent without model is valid", () => {
     const { brainDir, tearDown } = cloneFixture((b) => {
       writeFileSync(
         join(b, "subagent", "security-reviewer", "CORE.md"),
@@ -135,14 +132,14 @@ describe("runValidate — broken cards", () => {
     });
     try {
       const { stderr, exitCode } = runAndCapture(brainDir);
-      expect(exitCode).toBe(1);
-      expect(stderr).toContain("missing required field: model");
+      expect(exitCode).toBe(0);
+      expect(stderr).toBe("");
     } finally {
       tearDown();
     }
   });
 
-  test("subagent bad model value", () => {
+  test("subagent model metadata is rejected", () => {
     const { brainDir, tearDown } = cloneFixture((b) => {
       writeFileSync(
         join(b, "subagent", "security-reviewer", "CORE.md"),
@@ -152,7 +149,173 @@ describe("runValidate — broken cards", () => {
     try {
       const { stderr, exitCode } = runAndCapture(brainDir);
       expect(exitCode).toBe(1);
-      expect(stderr).toContain("unknown model: gpt4");
+      expect(stderr).toContain("unknown frontmatter field for type 'subagent': model");
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("unknown card in uses", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      writeFileSync(
+        join(b, "subagent", "security-reviewer", "CORE.md"),
+        `---\ndescription: "x"\nuses: [methodology/missing]\n---\n# x\n`
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("unknown card in uses: methodology/missing");
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("malformed uses target", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      writeFileSync(
+        join(b, "subagent", "security-reviewer", "CORE.md"),
+        `---\ndescription: "x"\nuses: [tdd]\n---\n# x\n`
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("invalid uses target 'tdd'");
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("self use and uses cycles are rejected", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      writeFileSync(
+        join(b, "subagent", "security-reviewer", "CORE.md"),
+        `---\ndescription: "x"\nuses: [subagent/style-reviewer]\n---\n# x\n`
+      );
+      writeFileSync(
+        join(b, "subagent", "style-reviewer", "CORE.md"),
+        `---\ndescription: "x"\nuses: [subagent/security-reviewer]\n---\n# x\n`
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        "uses cycle: subagent/security-reviewer -> subagent/style-reviewer -> subagent/security-reviewer"
+      );
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("harness-specific content reports file line rule and token", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      writeFileSync(
+        join(b, "subagent", "security-reviewer", "CORE.md"),
+        `---\ndescription: "x"\n---\n# x\n\nRun this with Claude Code using the sonnet tier.\n`
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("harness leak [harness-name]: Claude Code");
+      expect(stderr).toContain("harness leak [vendor-model-tier]: sonnet");
+      expect(stderr).toContain("brain/subagent/security-reviewer/CORE.md:6");
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("guard config adds terms and narrowly allows rules", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      const root = join(b, "..");
+      mkdirSync(join(root, ".tagen"), { recursive: true });
+      writeFileSync(
+        join(root, ".tagen", "agnostic-guard.json"),
+        JSON.stringify({
+          version: 1,
+          additionalTerms: [
+            {
+              id: "local-harness",
+              term: "HarnessX",
+              caseSensitive: true,
+            },
+          ],
+          allow: [
+            {
+              pathPrefix: "brain/architecture/cli/",
+              rules: ["local-harness"],
+            },
+          ],
+        })
+      );
+      writeFileSync(
+        join(b, "architecture", "cli", "CORE.md"),
+        `---\ndescription: "HarnessX comparison"\n---\n# HarnessX\n`
+      );
+      writeFileSync(
+        join(b, "lang", "rust", "CORE.md"),
+        `---\ndescription: "HarnessX patterns"\n---\n# Rust\n`
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).not.toContain("brain/architecture/cli/CORE.md");
+      expect(stderr).toContain(
+        "brain/lang/rust/CORE.md:2: harness leak [local-harness]: HarnessX"
+      );
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("invalid guard config is a validation failure", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      const root = join(b, "..");
+      mkdirSync(join(root, ".tagen"), { recursive: true });
+      writeFileSync(
+        join(root, ".tagen", "agnostic-guard.json"),
+        JSON.stringify({
+          version: 1,
+          allow: [{ pathPrefix: "../plugins/", rules: ["harness-name"] }],
+        })
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("pathPrefix must stay under brain/");
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("additional guard terms cannot replace built-in rules", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      const root = join(b, "..");
+      mkdirSync(join(root, ".tagen"), { recursive: true });
+      writeFileSync(
+        join(root, ".tagen", "agnostic-guard.json"),
+        JSON.stringify({
+          version: 1,
+          additionalTerms: [
+            {
+              id: "harness-name",
+              term: "anything",
+              caseSensitive: false,
+            },
+          ],
+        })
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        "additionalTerms[0].id conflicts with built-in rule 'harness-name'"
+      );
     } finally {
       tearDown();
     }
@@ -168,7 +331,7 @@ describe("runValidate — broken cards", () => {
     try {
       const { stderr, exitCode } = runAndCapture(brainDir);
       expect(exitCode).toBe(1);
-      expect(stderr).toContain("dotnet: collides between");
+      expect(stderr).toContain("alias 'dotnet' collides between");
     } finally {
       tearDown();
     }
