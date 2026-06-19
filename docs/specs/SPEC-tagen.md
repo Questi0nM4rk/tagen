@@ -111,6 +111,12 @@ brain/
 
 `findBrainDir()` walks up from `process.cwd()` up to 10 parent directories looking for a `brain/` directory containing at least one subdirectory with at least one card directory containing a `CORE.md`. The first match wins. Errors with a clear message if not found.
 
+`--root <dir>` overrides discovery for `get`, `list`, and `validate`. Tagen
+resolves `<dir>/brain` exactly, without walking parent directories, and errors
+when that path is not a brain. This lets installed plugin wrappers point at a
+live marketplace even when the wrapper runs from a harness cache directory.
+The override is purely a filesystem location and carries no harness semantics.
+
 ### Card structure
 
 Every card directory contains:
@@ -159,13 +165,14 @@ Four commands. All read-only except `tagen add`.
 The composition entry point. Fuzzy-matches positional arguments to cards, resolves `requires:` slots, emits a JSON manifest to stdout.
 
 ```
-tagen get [args...] [--type T --name N]... [--pin <type>=<name>]... [--json] [--dry-run]
+tagen get [args...] [--type T --name N]... [--pin <type>=<name>]... [--json] [--root <dir>]
 ```
 
 - `args` (positional, repeatable): each arg is fuzzy-matched against canonical names + aliases. Minimum 3 characters per arg.
 - `--type T --name N` (paired flags, repeatable): explicit `(type, name)` selection. Bypasses fuzzy matching for these pairs.
 - `--pin <type>=<name>` (repeatable): force a specific card to fill a given slot. Overrides alphabetical-first slot resolution.
 - `--json` (default true): output JSON to stdout.
+- `--root <dir>`: resolve `<dir>/brain` exactly instead of walking up from cwd.
 - No args → print help, exit 0.
 
 Exit codes: 0 (manifest emitted, warnings allowed), 1 (validation error), 2 (no matches).
@@ -175,12 +182,13 @@ Exit codes: 0 (manifest emitted, warnings allowed), 1 (validation error), 2 (no 
 Browse the catalog. By default lists every card as `<type>/<name>`. With `--aliases`, prints each card's aliases beside its canonical name.
 
 ```
-tagen list [--type T] [--aliases] [--json]
+tagen list [--type T] [--aliases] [--json] [--root <dir>]
 ```
 
 - `--type T`: list only cards under `brain/<T>/`.
 - `--aliases`: include aliases for each card. Text mode prints `<type>/<name>  (alias1, alias2)`. JSON mode adds `aliases: string[]` to each entry.
 - `--json`: machine-readable output.
+- `--root <dir>`: resolve `<dir>/brain` exactly instead of walking up from cwd.
 
 Exit codes: 0 (success), 1 (validation error reading the tree).
 
@@ -189,10 +197,11 @@ Exit codes: 0 (success), 1 (validation error reading the tree).
 Walk the tree. Check every rule (see Validate rules below). Print all violations. Exit non-zero on any failure.
 
 ```
-tagen validate [--verbose]
+tagen validate [--verbose] [--root <dir>]
 ```
 
 - `--verbose`: per-card per-rule trace.
+- `--root <dir>`: resolve `<dir>/brain` exactly instead of walking up from cwd.
 
 Exit codes: 0 (clean), 1 (violations), 2 (brain/ not found).
 
@@ -265,7 +274,7 @@ Used by `tagen get`.
 
 The output of `tagen get`. **Stable contract** — breaking changes need a dedicated PR with consumer updates in lockstep.
 
-All paths in the manifest are relative to the top-level `root` field — the absolute path of the marketplace directory tagen discovered. The agent resolves any path with `root + "/" + path`. This makes the manifest dir-agnostic: the same card content works regardless of where the marketplace lives on disk.
+All paths in the manifest are relative to the top-level `root` field — the absolute path of the marketplace directory tagen discovered or received through `--root`. The agent resolves any path with `root + "/" + path`. This makes the manifest dir-agnostic: the same card content works regardless of where the marketplace lives on disk.
 
 ```json
 {

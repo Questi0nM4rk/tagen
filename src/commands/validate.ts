@@ -3,6 +3,7 @@ import { join } from "node:path";
 import Ajv, { type AnySchema, type ValidateFunction } from "ajv";
 import Ajv2020 from "ajv/dist/2020.js";
 import { booleanFlag, defineCommand } from "../cli/command.ts";
+import { ROOT_FLAG } from "../cli/root.ts";
 import { loadAgnosticConfig } from "../lib/agnostic-config.ts";
 import { findAliasCollisions } from "../lib/aliases.ts";
 import { findUsesCycles, resolveUses } from "../lib/card-references.ts";
@@ -86,9 +87,9 @@ export function runValidate(ctx: ValidationContext, opts: ValidateOptions): void
 export const validateCommand = defineCommand({
   name: "validate",
   summary: "Walk the tree and report every rule violation; exit non-zero on any",
-  flags: [VERBOSE_FLAG],
+  flags: [VERBOSE_FLAG, ROOT_FLAG],
   positional: "forbid",
-  catalog: "diagnostic",
+  catalog: { policy: "diagnostic", rootFlag: ROOT_FLAG },
   decode(args): ValidateOptions {
     return { verbose: args.has(VERBOSE_FLAG) };
   },

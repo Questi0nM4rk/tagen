@@ -35,13 +35,18 @@ export interface CommandContext extends LoadResult {
   readonly root: string;
 }
 
+export interface CatalogConfig {
+  readonly policy: CatalogPolicy;
+  readonly rootFlag?: ValueFlag<string, false>;
+}
+
 interface CommandDefinition<Name extends string, Options> {
   readonly name: Name;
   readonly summary: string;
   readonly flags: readonly CommandFlag[];
   readonly positional: PositionalPolicy;
   readonly positionalHelp?: readonly string[];
-  readonly catalog: CatalogPolicy;
+  readonly catalog: CatalogConfig;
   decode(args: ParsedCommandArgs): Options;
   execute(context: CommandContext, options: Options): void | Promise<void>;
 }

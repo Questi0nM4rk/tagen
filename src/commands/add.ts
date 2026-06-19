@@ -147,7 +147,7 @@ export const addCommand = defineCommand({
   summary: "Scaffold a new card interactively (the only command that writes)",
   flags: [],
   positional: "forbid",
-  catalog: "clean",
+  catalog: { policy: "clean" },
   decode() {
     return undefined;
   },

@@ -37,6 +37,14 @@ export function findBrainDir(start: string = process.cwd()): string {
   );
 }
 
+/** Resolve `<root>/brain` exactly without walking parent directories. */
+export function resolveBrainDir(root: string): string {
+  const resolvedRoot = resolve(root);
+  const brain = join(resolvedRoot, BRAIN_DIR);
+  if (looksLikeBrain(brain)) return brain;
+  throw new Error(`tagen: no brain/ directory at ${resolvedRoot} (--root)`);
+}
+
 /** brain/ exists and has at least one type dir with at least one card/CORE.md. */
 function looksLikeBrain(brain: string): boolean {
   if (!existsSync(brain) || !statSync(brain).isDirectory()) return false;
