@@ -115,6 +115,14 @@ export function compose(
   const matchedSorted = expanded.cards.sort(byTypeName);
 
   const requiredTypes = collectRequires(matchedSorted);
+  const unknownRequiredTypes = requiredTypes.filter((type) => !knownTypes.has(type));
+  if (unknownRequiredTypes.length > 0) {
+    return {
+      errors: unknownRequiredTypes.map((type) => `unknown type in requires: ${type}`),
+      browseTypes,
+      emptyMatch: false,
+    };
+  }
   const slots: ResolvedSlot[] = [];
   const filled: Record<CardType, FilledSlot> = {};
   const fillerKeys = new Set<string>();

@@ -222,18 +222,24 @@ function runTestCount(): number | null {
   return parseRanCount(combined);
 }
 
-interface PackageVersion {
-  readonly version?: string;
-}
-
 function readPackageVersion(): string | null {
   const raw = readFile("package.json");
   if (raw === null) {
     return null;
   }
   try {
-    const pkg = JSON.parse(raw) as PackageVersion;
-    return pkg.version ?? null;
+    const pkg: unknown = JSON.parse(raw);
+    if (
+      pkg === null ||
+      typeof pkg !== "object" ||
+      Array.isArray(pkg) ||
+      !("version" in pkg) ||
+      typeof pkg.version !== "string"
+    ) {
+      process.stderr.write(`${SCRIPT}: package.json has no string version field\n`);
+      return null;
+    }
+    return pkg.version;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`${SCRIPT}: package.json parse failed: ${msg}\n`);

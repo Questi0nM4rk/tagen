@@ -1,170 +1,81 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { runAdd } from "./commands/add.ts";
-import { runGet } from "./commands/get.ts";
-import { runList } from "./commands/list.ts";
-import { runValidate } from "./commands/validate.ts";
+import packageJson from "../package.json" with { type: "json" };
+import { parseCommandArgs } from "./cli/args.ts";
+import type { CommandDescriptor } from "./cli/command.ts";
+import { failCatalogLoad, isCliFailure, reportCliFailure } from "./cli/errors.ts";
+import { commands, findCommand, knownFlagNames } from "./commands/index.ts";
 import { findBrainDir, loadAllCards, marketplaceRoot } from "./lib/catalog.ts";
-import { type ComposeQuery, emptyQuery, knownTypesFromCards } from "./lib/compose.ts";
-import type { CardId, CardType } from "./lib/types.ts";
+import { errorMessage } from "./lib/errors.ts";
 
-const USAGE = `tagen — read-only CLI for a brain/ directory of typed cards
+function usage(): string {
+  const commandWidth = Math.max(...commands.map((command) => command.name.length));
+  const commandLines = commands
+    .map((command) => `  ${command.name.padEnd(commandWidth)}  ${command.summary}`)
+    .join("\n");
+  const commandHelp = commands.map(formatCommandHelp).join("\n");
+
+  return `tagen — read-only CLI for a brain/ directory of typed cards
 
 Usage: tagen <command> [options]
 
 Commands:
-  list       List catalog cards as <type>/<name>
-  validate   Walk the tree and report every rule violation; exit non-zero on any
-  get        Resolve a composition into a JSON manifest (--json)
-  add        Scaffold a new card interactively (the only command that writes)
+${commandLines}
 
-list:
-  --type T         Restrict to one type
-  --aliases        Include each card's aliases
-  --json           Machine-readable output
-
-get:
-  <args>...        Positional, fuzzy-matched against canonical names + aliases
-                   (min 3 chars). A bare type-name (e.g. 'methodology') triggers
-                   browse intent — equivalent to 'list --type T'.
-  --type T --name N      Explicit (type, name) selection (paired, repeatable)
-  --pin <type>=<name>    Force a card to fill a slot (repeatable)
-  --json                 Machine-readable manifest (default)
-
-validate:
-  --verbose         Per-card per-rule trace
-
+${commandHelp}
 Common:
   --help / -h       Show this help
   --version / -V    Print version
 `;
-
-const KNOWN_COMMANDS = new Set(["validate", "list", "get", "add"]);
-
-function readBundledVersion(): string {
-  const pkgPath = join(import.meta.dir, "..", "package.json");
-  const raw = readFileSync(pkgPath, "utf8");
-  const pkg = JSON.parse(raw) as { version?: string };
-  return pkg.version ?? "unknown";
 }
 
-interface ParsedArgs {
-  positional: string[];
-  flags: Map<string, string[]>;
-  bools: Set<string>;
-}
-
-const REPEAT_PAIR_FLAGS = new Set(["--type", "--name", "--pin"]);
-const BOOLEAN_FLAGS = new Set(["--json", "--verbose", "--aliases"]);
-
-function parseArgs(args: string[]): ParsedArgs {
-  const positional: string[] = [];
-  const flags = new Map<string, string[]>();
-  const bools = new Set<string>();
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === undefined) continue;
-    if (BOOLEAN_FLAGS.has(arg)) {
-      bools.add(arg);
-      continue;
-    }
-    if (REPEAT_PAIR_FLAGS.has(arg)) {
-      const v = args[i + 1];
-      if (v === undefined) {
-        process.stderr.write(`tagen: ${arg} requires a value\n`);
-        process.exit(1);
-      }
-      const list = flags.get(arg) ?? [];
-      list.push(v);
-      flags.set(arg, list);
-      i++;
-      continue;
-    }
-    positional.push(arg);
+function formatCommandHelp(command: CommandDescriptor<string, unknown>): string {
+  const lines = [`${command.name}:`];
+  lines.push(...(command.positionalHelp ?? []).map((line) => `  ${line}`));
+  for (const flag of command.flags) {
+    lines.push(`  ${flag.usage.padEnd(20)} ${flag.description}`);
   }
-  return { positional, flags, bools };
-}
-
-function buildComposeQuery(parsed: ParsedArgs): ComposeQuery {
-  const q = emptyQuery();
-  q.positional = parsed.positional;
-
-  const types = parsed.flags.get("--type") ?? [];
-  const names = parsed.flags.get("--name") ?? [];
-  if (types.length !== names.length) {
-    process.stderr.write("tagen: --type and --name must be paired\n");
-    process.exit(1);
-  }
-  for (let i = 0; i < types.length; i++) {
-    const id: CardId = { type: types[i] as CardType, name: names[i] as string };
-    q.explicit.push(id);
-  }
-
-  for (const pin of parsed.flags.get("--pin") ?? []) {
-    const eq = pin.indexOf("=");
-    if (eq <= 0 || eq === pin.length - 1) {
-      process.stderr.write(`tagen: invalid --pin '${pin}', expected <type>=<name>\n`);
-      process.exit(1);
-    }
-    q.pins.set(pin.slice(0, eq), pin.slice(eq + 1));
-  }
-  return q;
+  return `${lines.join("\n")}\n`;
 }
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const command = args[0];
+  const commandName = args[0];
 
-  if (!command || command === "--help" || command === "-h") {
-    process.stdout.write(USAGE);
+  if (!commandName || commandName === "--help" || commandName === "-h") {
+    process.stdout.write(usage());
     return;
   }
-  if (command === "--version" || command === "-V") {
-    process.stdout.write(`${readBundledVersion()}\n`);
+  if (commandName === "--version" || commandName === "-V") {
+    process.stdout.write(`${packageJson.version}\n`);
     return;
   }
-  if (!KNOWN_COMMANDS.has(command)) {
+
+  const command = findCommand(commandName);
+  if (!command) {
     process.stderr.write(
-      `Unknown command: ${command}\nRun 'tagen --help' for usage.\n`
+      `Unknown command: ${commandName}\nRun 'tagen --help' for usage.\n`
     );
     process.exit(1);
   }
 
-  const restArgs = args.slice(1);
-  const parsed = parseArgs(restArgs);
-  const json = parsed.bools.has("--json");
-  const verbose = parsed.bools.has("--verbose");
-  const aliases = parsed.bools.has("--aliases");
-
+  const parsed = parseCommandArgs(args.slice(1), command, knownFlagNames);
   const brainDir = findBrainDir();
   const root = marketplaceRoot(brainDir);
-  const { cards, protocols, frontmatterErrors } = loadAllCards(brainDir);
-
-  switch (command) {
-    case "list": {
-      const typeFilter = parsed.flags.get("--type")?.[0];
-      runList(cards, { json, type: typeFilter, aliases });
-      return;
-    }
-    case "validate": {
-      runValidate({ cards, protocols, root, frontmatterErrors }, { verbose });
-      return;
-    }
-    case "get": {
-      const query = buildComposeQuery(parsed);
-      runGet(cards, root, query, { json });
-      return;
-    }
-    case "add": {
-      const knownTypes = knownTypesFromCards(cards);
-      await runAdd(cards, knownTypes, brainDir);
-      return;
-    }
+  const catalog = loadAllCards(brainDir);
+  if (
+    command.catalog === "clean" &&
+    (catalog.catalogErrors.length > 0 || catalog.frontmatterErrors.size > 0)
+  ) {
+    failCatalogLoad(catalog);
   }
+
+  await command.run({ ...catalog, brainDir, root }, parsed);
 }
 
-main().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`Fatal: ${msg}\n`);
+main().catch((error: unknown) => {
+  if (isCliFailure(error)) {
+    reportCliFailure(error);
+    process.exit(1);
+  }
+  process.stderr.write(`Fatal: ${errorMessage(error)}\n`);
   process.exit(2);
 });

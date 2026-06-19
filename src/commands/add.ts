@@ -2,8 +2,12 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import type { Readable, Writable } from "node:stream";
+import { stringify as stringifyYaml } from "yaml";
+import { defineCommand } from "../cli/command.ts";
+import { knownTypesFromCards } from "../lib/compose.ts";
 import {
   type Card,
+  type CardFrontmatter,
   type CardType,
   KEBAB_NAME,
   SUBAGENT_HOST_TYPES,
@@ -110,14 +114,14 @@ export interface ScaffoldArgs {
 }
 
 export function scaffoldCard(a: ScaffoldArgs): string {
-  const lines: string[] = ["---"];
-  lines.push(`description: "${a.description.replace(/"/g, '\\"')}"`);
-  if (a.aliases.length > 0) lines.push(`aliases: [${a.aliases.join(", ")}]`);
-  if (a.requires.length > 0) lines.push(`requires: [${a.requires.join(", ")}]`);
-  if (a.uses.length > 0) lines.push(`uses: [${a.uses.join(", ")}]`);
-  if (a.subagents.length > 0) lines.push(`subagents: [${a.subagents.join(", ")}]`);
-  lines.push("---", "", `# ${a.name}`, "", a.description, "");
-  return lines.join("\n");
+  const frontmatter: CardFrontmatter = { description: a.description };
+  if (a.aliases.length > 0) frontmatter.aliases = a.aliases;
+  if (a.requires.length > 0) frontmatter.requires = a.requires;
+  if (a.uses.length > 0) frontmatter.uses = a.uses;
+  if (a.subagents.length > 0) frontmatter.subagents = a.subagents;
+
+  const yaml = stringifyYaml(frontmatter).trimEnd();
+  return `---\n${yaml}\n---\n\n# ${a.name}\n\n${a.description}\n`;
 }
 
 async function ask(rl: RL, question: string): Promise<string> {
@@ -137,3 +141,17 @@ function abort(msg: string): never {
   process.stderr.write(`${msg}\n`);
   process.exit(1);
 }
+
+export const addCommand = defineCommand({
+  name: "add",
+  summary: "Scaffold a new card interactively (the only command that writes)",
+  flags: [],
+  positional: "forbid",
+  catalog: "clean",
+  decode() {
+    return undefined;
+  },
+  execute(context) {
+    return runAdd(context.cards, knownTypesFromCards(context.cards), context.brainDir);
+  },
+});

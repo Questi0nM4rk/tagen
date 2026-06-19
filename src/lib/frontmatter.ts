@@ -1,4 +1,5 @@
 import { parse as parseYaml } from "yaml";
+import { isRecord } from "./errors.ts";
 import type { CardFrontmatter, CardType } from "./types.ts";
 
 /**
@@ -39,7 +40,7 @@ export function parseCore(source: string, type: CardType): ParseResult {
   const errors: string[] = [];
   const empty: CardFrontmatter = { description: "" };
 
-  const match = source.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
   if (!match) {
     errors.push("CORE.md missing YAML frontmatter");
     return { frontmatter: empty, body: source, errors };
@@ -57,12 +58,12 @@ export function parseCore(source: string, type: CardType): ParseResult {
     return { frontmatter: empty, body, errors };
   }
 
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+  if (!isRecord(raw)) {
     errors.push("CORE.md frontmatter must be a YAML mapping");
     return { frontmatter: empty, body, errors };
   }
 
-  const fm = raw as Record<string, unknown>;
+  const fm = raw;
   const allowed = new Set(allowedFor(type));
   for (const key of Object.keys(fm)) {
     if (!allowed.has(key)) {

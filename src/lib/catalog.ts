@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { parseCore } from "./frontmatter.ts";
 import type { Card, CardId, Protocol } from "./types.ts";
 
@@ -14,6 +14,8 @@ export interface LoadResult {
   protocols: Protocol[];
   /** Per-card frontmatter parse errors keyed by `<type>/<name>`. */
   frontmatterErrors: Map<string, string[]>;
+  /** Catalog-shape errors that prevent safely loading a card. */
+  catalogErrors: string[];
 }
 
 /**
@@ -64,17 +66,45 @@ export function loadAllCards(brainDir: string): LoadResult {
   const cards: Card[] = [];
   const protocols: Protocol[] = [];
   const frontmatterErrors = new Map<string, string[]>();
+  const brainStat = lstatSync(brainDir);
+  const catalogErrors = brainStat.isSymbolicLink()
+    ? ["brain: symlinks are not allowed under brain/"]
+    : findSymlinkErrors(brainDir, root);
+  if (brainStat.isSymbolicLink()) {
+    return { cards, protocols, frontmatterErrors, catalogErrors };
+  }
 
   for (const type of readdirSync(brainDir).sort()) {
     const typeDir = join(brainDir, type);
-    if (!isDir(typeDir)) continue;
+    if (!isDir(typeDir)) {
+      if (!lstatSync(typeDir).isSymbolicLink()) {
+        catalogErrors.push(`${type}: type must be a directory`);
+      }
+      continue;
+    }
     for (const name of readdirSync(typeDir).sort()) {
       const cardDir = join(typeDir, name);
-      if (!isDir(cardDir)) continue;
+      if (!isDir(cardDir)) {
+        if (!lstatSync(cardDir).isSymbolicLink()) {
+          catalogErrors.push(`${type}/${name}: card must be a directory`);
+        }
+        continue;
+      }
       const corePath = join(cardDir, CORE_FILE);
-      if (!existsSync(corePath)) continue;
 
       const id: CardId = { type, name };
+      let coreStat: ReturnType<typeof lstatSync>;
+      try {
+        coreStat = lstatSync(corePath);
+      } catch {
+        catalogErrors.push(`${type}/${name}/CORE.md: missing required file`);
+        continue;
+      }
+      if (coreStat.isSymbolicLink()) continue;
+      if (!coreStat.isFile()) {
+        catalogErrors.push(`${type}/${name}/CORE.md: must be a regular file`);
+        continue;
+      }
       const source = readFileSync(corePath, "utf8");
       const parsed = parseCore(source, type);
       if (parsed.errors.length > 0) {
@@ -98,7 +128,20 @@ export function loadAllCards(brainDir: string): LoadResult {
     }
   }
 
-  return { cards, protocols, frontmatterErrors };
+  return { cards, protocols, frontmatterErrors, catalogErrors };
+}
+
+function findSymlinkErrors(dir: string, root: string): string[] {
+  const errors: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isSymbolicLink()) {
+      errors.push(`${rel(path, root)}: symlinks are not allowed under brain/`);
+      continue;
+    }
+    if (entry.isDirectory()) errors.push(...findSymlinkErrors(path, root));
+  }
+  return errors;
 }
 
 function toProtocol(card: Card, root: string): Protocol {
@@ -125,7 +168,7 @@ function listFiles(dir: string, ext: string, root: string): string[] {
 
 function isDir(p: string): boolean {
   try {
-    return statSync(p).isDirectory();
+    return lstatSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -134,5 +177,5 @@ function isDir(p: string): boolean {
 /** Root-relative form of an absolute path. Exported so commands and compose
  * use one definition (manifest paths must all be relative to `root`). */
 export function rel(absPath: string, root: string): string {
-  return relative(root, absPath);
+  return relative(root, absPath).split(sep).join("/");
 }

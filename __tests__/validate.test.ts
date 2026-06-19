@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runValidate } from "../src/commands/validate.ts";
@@ -10,8 +17,8 @@ const CLEAN_BRAIN = join(FIXTURES, "brain");
 
 function makeContext(brainDir: string) {
   const root = marketplaceRoot(brainDir);
-  const { cards, protocols, frontmatterErrors } = loadAllCards(brainDir);
-  return { cards, protocols, root, frontmatterErrors };
+  const { cards, protocols, frontmatterErrors, catalogErrors } = loadAllCards(brainDir);
+  return { cards, protocols, root, frontmatterErrors, catalogErrors };
 }
 
 const ORIG_EXIT = process.exit;
@@ -75,6 +82,21 @@ describe("runValidate — clean fixture", () => {
 });
 
 describe("runValidate — broken cards", () => {
+  test("reports catalog and frontmatter failures in one diagnostic run", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      mkdirSync(join(b, "lang", "missing-core"));
+      writeFileSync(join(b, "lang", "csharp", "CORE.md"), "# missing frontmatter\n");
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("lang/missing-core/CORE.md: missing required file");
+      expect(stderr).toContain("lang/csharp: CORE.md missing YAML frontmatter");
+    } finally {
+      tearDown();
+    }
+  });
+
   test("unknown requires type", () => {
     const { brainDir, tearDown } = cloneFixture((b) => {
       writeFileSync(
@@ -337,6 +359,22 @@ describe("runValidate — broken cards", () => {
     }
   });
 
+  test("alias collisions are case-insensitive like fuzzy matching", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      writeFileSync(
+        join(b, "lang", "python", "CORE.md"),
+        `---\ndescription: "x"\naliases: [DotNet]\n---\n# x\n`
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("alias 'DotNet' collides between");
+    } finally {
+      tearDown();
+    }
+  });
+
   test("alias collides with canonical name", () => {
     const { brainDir, tearDown } = cloneFixture((b) => {
       writeFileSync(
@@ -401,6 +439,83 @@ describe("runValidate — broken cards", () => {
     }
   });
 
+  test("CORE.md symlinks are rejected instead of bypassing content validation", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      const core = join(b, "lang", "rust", "CORE.md");
+      const target = join(b, "..", "external.md");
+      writeFileSync(target, `---\ndescription: "x"\n---\n# x\n\nUse Claude Code.\n`);
+      rmSync(core);
+      symlinkSync(target, core);
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("CORE.md: symlinks are not allowed under brain/");
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("CORE.md directories are reported as validation errors instead of fatal reads", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      const core = join(b, "lang", "rust", "CORE.md");
+      rmSync(core);
+      mkdirSync(core);
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("CORE.md: must be a regular file");
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("symlinked references are rejected instead of bypassing content validation", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      const target = join(b, "..", "external.md");
+      const references = join(b, "lang", "rust", "references");
+      writeFileSync(target, "Use Claude Code.\n");
+      mkdirSync(references, { recursive: true });
+      symlinkSync(target, join(references, "external.md"));
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        "brain/lang/rust/references/external.md: symlinks are not allowed under brain/"
+      );
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("missing CORE.md is reported when another card anchors brain discovery", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      rmSync(join(b, "lang", "rust", "CORE.md"));
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("lang/rust/CORE.md: missing required file");
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("non-directory card paths are reported instead of ignored", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      writeFileSync(join(b, "lang", "not-a-card"), "plain file\n");
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("lang/not-a-card: card must be a directory");
+    } finally {
+      tearDown();
+    }
+  });
+
   test("validators dir on non-review/methodology card rejected", () => {
     const { brainDir, tearDown } = cloneFixture((b) => {
       const dir = join(b, "lang", "csharp", "validators");
@@ -430,6 +545,25 @@ describe("runValidate — broken cards", () => {
       const { stderr, exitCode } = runAndCapture(brainDir);
       expect(exitCode).toBe(1);
       expect(stderr).toContain("passes schema (should fail)");
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("protocol structural validation reports all missing components", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      const protocol = join(b, "protocol", "finding");
+      rmSync(join(protocol, "schema.json"));
+      rmSync(join(protocol, "validator.ts"));
+      rmSync(join(protocol, "examples"), { recursive: true });
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("missing schema.json");
+      expect(stderr).toContain("missing validator.ts");
+      expect(stderr).toContain("examples/valid must contain at least one");
+      expect(stderr).toContain("examples/invalid must contain at least one");
     } finally {
       tearDown();
     }

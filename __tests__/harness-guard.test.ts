@@ -42,4 +42,41 @@ describe("harness guard", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("scans large files and applies allowance prefixes on path boundaries", () => {
+    const root = mkdtempSync(join(tmpdir(), "tagen-guard-boundary-"));
+    try {
+      const brain = join(root, "brain");
+      const allowed = join(brain, "architecture", "cli");
+      const sibling = join(brain, "architecture", "cli-extra");
+      mkdirSync(allowed, { recursive: true });
+      mkdirSync(sibling, { recursive: true });
+      writeFileSync(join(allowed, "CORE.md"), "Claude Code\n");
+      writeFileSync(
+        join(sibling, "CORE.md"),
+        `${"portable ".repeat(140_000)}Claude Code\n`
+      );
+
+      const leaks = findHarnessLeaks(brain, root, {
+        additionalTerms: [],
+        allow: [
+          {
+            pathPrefix: "brain/architecture/cli",
+            rules: ["harness-name"],
+          },
+        ],
+      });
+
+      expect(leaks).toEqual([
+        {
+          path: "brain/architecture/cli-extra/CORE.md",
+          line: 1,
+          ruleId: "harness-name",
+          token: "Claude Code",
+        },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

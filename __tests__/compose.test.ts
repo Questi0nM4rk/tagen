@@ -83,6 +83,27 @@ describe("compose", () => {
     expect(r.manifest?.slots[0]?.fillerCard).toBe("");
   });
 
+  test("requires pointing to an unknown catalog type blocks composition", () => {
+    const strict = cards.find(
+      (card) => card.id.type === "review" && card.id.name === "strict"
+    );
+    if (!strict) throw new Error("fixture card missing");
+    const modified = cards.map((card) =>
+      card === strict
+        ? {
+            ...card,
+            frontmatter: {
+              ...card.frontmatter,
+              requires: ["missing-type"],
+            },
+          }
+        : card
+    );
+    const r = compose(modified, ROOT, q(["strict"]), knownTypes);
+    expect(r.errors).toEqual(["unknown type in requires: missing-type"]);
+    expect(r.manifest).toBeUndefined();
+  });
+
   test("subagents collected from review/methodology", () => {
     const r = compose(cards, ROOT, q(["strict", "csharp"]), knownTypes);
     expect(r.manifest?.subagents).toEqual([

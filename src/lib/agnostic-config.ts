@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { errorMessage, isRecord } from "./errors.ts";
 
 export interface AdditionalTerm {
   id: string;
@@ -41,7 +42,7 @@ export function loadAgnosticConfig(
   } catch (error) {
     return {
       config: empty,
-      errors: [`${CONFIG_PATH.join("/")}: invalid JSON: ${messageOf(error)}`],
+      errors: [`${CONFIG_PATH.join("/")}: invalid JSON: ${errorMessage(error)}`],
     };
   }
   if (!isRecord(raw)) {
@@ -84,28 +85,27 @@ function parseTerms(
       continue;
     }
     rejectUnknownKeys(item, TERM_KEYS, tag, errors);
-    if (typeof item.id !== "string" || item.id.length === 0) {
+    const id = item.id;
+    const term = item.term;
+    const caseSensitive = item.caseSensitive;
+    if (typeof id !== "string" || id.length === 0) {
       errors.push(`${tag}.id must be a non-empty string`);
       continue;
     }
-    if (ids.has(item.id)) errors.push(`${tag}.id duplicates '${item.id}'`);
-    if (reservedIds.has(item.id)) {
-      errors.push(`${tag}.id conflicts with built-in rule '${item.id}'`);
+    if (ids.has(id)) errors.push(`${tag}.id duplicates '${id}'`);
+    if (reservedIds.has(id)) {
+      errors.push(`${tag}.id conflicts with built-in rule '${id}'`);
     }
-    ids.add(item.id);
-    if (typeof item.term !== "string" || item.term.length === 0) {
+    ids.add(id);
+    if (typeof term !== "string" || term.length === 0) {
       errors.push(`${tag}.term must be a non-empty string`);
       continue;
     }
-    if (typeof item.caseSensitive !== "boolean") {
+    if (typeof caseSensitive !== "boolean") {
       errors.push(`${tag}.caseSensitive must be a boolean`);
       continue;
     }
-    out.push({
-      id: item.id,
-      term: item.term,
-      caseSensitive: item.caseSensitive,
-    });
+    out.push({ id, term, caseSensitive });
   }
   return out;
 }
@@ -129,6 +129,7 @@ function parseAllowances(
     }
     rejectUnknownKeys(item, ALLOW_KEYS, tag, errors);
     const pathPrefix = item.pathPrefix;
+    const rules = item.rules;
     if (
       typeof pathPrefix !== "string" ||
       !pathPrefix.startsWith("brain/") ||
@@ -137,14 +138,14 @@ function parseAllowances(
       errors.push(`${tag}.pathPrefix must stay under brain/`);
       continue;
     }
-    if (!isStringArray(item.rules) || item.rules.length === 0) {
+    if (!isStringArray(rules) || rules.length === 0) {
       errors.push(`${tag}.rules must be a non-empty string array`);
       continue;
     }
-    for (const rule of item.rules) {
+    for (const rule of rules) {
       if (!knownRuleIds.has(rule)) errors.push(`${tag}: unknown rule id '${rule}'`);
     }
-    out.push({ pathPrefix, rules: item.rules });
+    out.push({ pathPrefix, rules });
   }
   return out;
 }
@@ -160,14 +161,6 @@ function rejectUnknownKeys(
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
