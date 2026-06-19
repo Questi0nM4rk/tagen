@@ -1,0 +1,2349 @@
+diff --git a/AGENTS.md b/AGENTS.md
+new file mode 120000
+index 0000000..681311e
+--- /dev/null
++++ b/AGENTS.md
+@@ -0,0 +1 @@
++CLAUDE.md
+\ No newline at end of file
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 2dae22c..613d63f 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -1,11 +1,11 @@
+ # CLAUDE.md — tagen
+ 
+ Standalone read-only CLI that walks a calling project's `brain/<type>/<name>/`
+-directory tree of typed cards and emits a JSON composition manifest.
++directory tree of typed cards and emits a harness-neutral JSON composition manifest.
+ 
+ The directory tree IS the vocabulary — no `vocabulary.yaml`, no `capabilities.yaml`,
+ no `tags:` / `provides:` / `emits:` / `consumes:` frontmatter. Five frontmatter
+-fields exist: `description`, `aliases`, `requires`, `subagents`, `model`.
++fields exist: `description`, `aliases`, `requires`, `uses`, `subagents`.
+ 
+ Spec: `docs/specs/SPEC-tagen.md`. Manifest contract: `docs/tagen-get-manifest.schema.json`.
+ 
+@@ -167,8 +167,13 @@ Adding a new type = `mkdir brain/<newtype>/`. Adding a new card =
+ 
+ ### Strict per-type frontmatter allowlist
+ Every type has an exact allowed-field set. `subagents:` is review/methodology
+-only. `model:` is subagent only. Anything outside the allowlist for a given
+-type is a `tagen validate` error.
++only. `uses:` is subagent only and names canonical `<type>/<name>` cards.
++Anything outside the allowlist for a given type is a `tagen validate` error.
++
++### Harness-neutral brain
++`brain/` contains no vendor model names, harness lifecycle events, harness
++paths, or harness-only commands. `tagen validate` enforces this through the
++agnostic guard. Harness adapters own model choice and registration details.
+ 
+ ### Read-only by contract
+ Every command except `add` is read-only. `tagen get` writes the manifest to stdout, warnings to stderr.
+diff --git a/README.md b/README.md
+index e935fdc..71bbbf3 100644
+--- a/README.md
++++ b/README.md
+@@ -10,8 +10,8 @@ for a task.
+ 
+ The directory tree IS the vocabulary — no `vocabulary.yaml`, no
+ `capabilities.yaml`, no `tags:` / `provides:` / `emits:` / `consumes:`.
+-Five frontmatter fields total: `description`, `aliases`, `requires`,
+-`subagents`, `model`.
++Five frontmatter fields total: `description`, `aliases`, `requires`, `uses`,
++`subagents`. Harness-specific model selection belongs in harness adapters.
+ 
+ ---
+ 
+@@ -71,9 +71,14 @@ ship `validators/` (executable scripts) plus a `lib/` for shared modules.
+ `tagen get`:
+ 
+ 1. Fuzzy-matches positional args to `<type>/<name>` (3-char min; exact > prefix > substring > Levenshtein).
+-2. Resolves `requires: [<type>]` slots by picking a matched card under that type — alphabetical first, `--pin <type>=<name>` overrides.
+-3. Collects subagents declared by review/methodology cards, plus their `validators/*.ts`.
+-4. Emits a JSON manifest with all paths root-relative, so the agent resolves them as `root + "/" + path`.
++2. Expands direct `uses: [<type>/<name>]` cards declared by seed subagents.
++3. Resolves `requires: [<type>]` slots over the expanded set — alphabetical first, `--pin <type>=<name>` overrides.
++4. Collects subagents declared by review/methodology cards, plus their `validators/*.ts`.
++5. Emits a JSON manifest with all paths root-relative, so the agent resolves them as `root + "/" + path`.
++
++`tagen validate` also rejects harness-specific model names, lifecycle events,
++paths, and commands under `brain/`. Narrow, checked-in exceptions and
++project-specific terms live in `.tagen/agnostic-guard.json`.
+ 
+ See [docs/specs/SPEC-tagen.md](docs/specs/SPEC-tagen.md) for the full spec
+ and [docs/tagen-get-manifest.schema.json](docs/tagen-get-manifest.schema.json)
+diff --git a/__tests__/add.test.ts b/__tests__/add.test.ts
+index 26392a3..fd796dd 100644
+--- a/__tests__/add.test.ts
++++ b/__tests__/add.test.ts
+@@ -18,6 +18,7 @@ describe("scaffoldCard", () => {
+       description: "Ruby patterns",
+       aliases: [],
+       requires: [],
++      uses: [],
+       subagents: [],
+     });
+     const parsed = parseCore(out, "lang");
+@@ -34,6 +35,7 @@ describe("scaffoldCard", () => {
+       description: "min review",
+       aliases: ["m"],
+       requires: ["lang"],
++      uses: [],
+       subagents: ["security-reviewer"],
+     });
+     const parsed = parseCore(out, "review");
+@@ -41,19 +43,20 @@ describe("scaffoldCard", () => {
+     expect(parsed.frontmatter.subagents).toEqual(["security-reviewer"]);
+   });
+ 
+-  test("subagent card emits model field", () => {
++  test("subagent card emits uses and no model field", () => {
+     const out = scaffoldCard({
+       type: "subagent",
+       name: "noop",
+       description: "no-op",
+       aliases: [],
+       requires: [],
++      uses: ["methodology/tdd"],
+       subagents: [],
+-      model: "haiku",
+     });
+     const parsed = parseCore(out, "subagent");
+     expect(parsed.errors).toEqual([]);
+-    expect(parsed.frontmatter.model).toBe("haiku");
++    expect(parsed.frontmatter.uses).toEqual(["methodology/tdd"]);
++    expect(out).not.toContain("model:");
+   });
+ 
+   test("escapes double-quotes in description", () => {
+@@ -63,6 +66,7 @@ describe("scaffoldCard", () => {
+       description: 'has "quotes"',
+       aliases: [],
+       requires: [],
++      uses: [],
+       subagents: [],
+     });
+     expect(out).toContain('description: "has \\"quotes\\""');
+diff --git a/__tests__/card-references.test.ts b/__tests__/card-references.test.ts
+new file mode 100644
+index 0000000..26c8fac
+--- /dev/null
++++ b/__tests__/card-references.test.ts
+@@ -0,0 +1,71 @@
++import { describe, expect, test } from "bun:test";
++import { join } from "node:path";
++import {
++  expandDirectUses,
++  findUsesCycles,
++  resolveUses,
++} from "../src/lib/card-references.ts";
++import { loadAllCards } from "../src/lib/catalog.ts";
++
++const BRAIN = join(import.meta.dir, "fixtures", "brain");
++const { cards } = loadAllCards(BRAIN);
++
++describe("card references", () => {
++  test("resolves canonical type/name IDs and deduplicates", () => {
++    const implementer = cards.find((card) => card.id.name === "implementer");
++    if (!implementer) throw new Error("fixture missing");
++    const owner = {
++      ...implementer,
++      frontmatter: {
++        ...implementer.frontmatter,
++        uses: ["methodology/tdd", "methodology/tdd"],
++      },
++    };
++    const result = resolveUses(owner, cards);
++    expect(result.errors).toEqual([]);
++    expect(result.cards.map((card) => `${card.id.type}/${card.id.name}`)).toEqual([
++      "methodology/tdd",
++    ]);
++  });
++
++  test("expands only the original seed set", () => {
++    const implementer = cards.find((card) => card.id.name === "implementer");
++    const tdd = cards.find((card) => card.id.name === "tdd");
++    if (!implementer || !tdd) throw new Error("fixture missing");
++    const modified = cards.map((card) =>
++      card === tdd
++        ? {
++            ...card,
++            frontmatter: { ...card.frontmatter, uses: ["architecture/cli"] },
++          }
++        : card
++    );
++    const result = expandDirectUses([implementer], modified);
++    expect(result.cards.some((card) => card.id.name === "tdd")).toBe(true);
++    expect(result.cards.some((card) => card.id.name === "cli")).toBe(false);
++  });
++
++  test("reports deterministic cycles", () => {
++    const base = cards[0];
++    if (!base) throw new Error("fixture missing");
++    const a = {
++      ...base,
++      id: { type: "subagent", name: "a" },
++      frontmatter: {
++        description: "a",
++        uses: ["subagent/b"],
++      },
++    };
++    const b = {
++      ...base,
++      id: { type: "subagent", name: "b" },
++      frontmatter: {
++        description: "b",
++        uses: ["subagent/a"],
++      },
++    };
++    expect(findUsesCycles([a, b])).toEqual([
++      "uses cycle: subagent/a -> subagent/b -> subagent/a",
++    ]);
++  });
++});
+diff --git a/__tests__/catalog.test.ts b/__tests__/catalog.test.ts
+index e39624b..b430a22 100644
+--- a/__tests__/catalog.test.ts
++++ b/__tests__/catalog.test.ts
+@@ -71,11 +71,11 @@ describe("loadAllCards", () => {
+     expect(strict?.validators).toEqual(["brain/review/strict/validators/no-emoji.ts"]);
+   });
+ 
+-  test("subagents carry model frontmatter", () => {
+-    const sec = result.cards.find(
+-      (c) => c.id.type === "subagent" && c.id.name === "security-reviewer"
++  test("subagents carry harness-neutral uses frontmatter", () => {
++    const implementer = result.cards.find(
++      (c) => c.id.type === "subagent" && c.id.name === "implementer"
+     );
+-    expect(sec?.frontmatter.model).toBe("sonnet");
++    expect(implementer?.frontmatter.uses).toEqual(["methodology/tdd"]);
+   });
+ 
+   test("protocol cards include schema/validator/examples paths", () => {
+diff --git a/__tests__/compose.test.ts b/__tests__/compose.test.ts
+index 057c70a..a79f50d 100644
+--- a/__tests__/compose.test.ts
++++ b/__tests__/compose.test.ts
+@@ -130,4 +130,65 @@ describe("compose", () => {
+       expect(path.startsWith("brain/")).toBe(true);
+     }
+   });
++
++  test("subagent uses expands direct cards before slot filling", () => {
++    const r = compose(
++      cards,
++      ROOT,
++      q(["implementer", "csharp", "bun-test"]),
++      knownTypes
++    );
++    expect(r.errors).toEqual([]);
++    expect(r.manifest?.modules.map((m) => `${m.type}/${m.name}`)).toEqual([
++      "lang/csharp",
++      "methodology/tdd",
++      "subagent/implementer",
++      "test/bun-test",
++    ]);
++    expect(r.manifest?.core).toContain("brain/methodology/tdd/CORE.md");
++    expect(r.manifest?.references).toContain(
++      "brain/methodology/tdd/references/cycle.md"
++    );
++    expect(r.manifest?.filled.lang?.core).toBe("brain/lang/csharp/CORE.md");
++    expect(r.manifest?.filled.test?.core).toBe("brain/test/bun-test/CORE.md");
++  });
++
++  test("uses is one level and does not follow uses on an added card", () => {
++    const implementer = cards.find((c) => c.id.name === "implementer");
++    const tdd = cards.find((c) => c.id.type === "methodology" && c.id.name === "tdd");
++    if (!implementer || !tdd) throw new Error("fixture cards missing");
++    const modified = cards.map((card) =>
++      card === tdd
++        ? {
++            ...card,
++            frontmatter: {
++              ...card.frontmatter,
++              uses: ["architecture/cli"],
++            },
++          }
++        : card
++    );
++    const r = compose(
++      modified,
++      ROOT,
++      q(["implementer", "csharp", "bun-test"]),
++      knownTypes
++    );
++    expect(r.manifest?.modules.some((m) => m.name === "cli")).toBe(false);
++  });
++
++  test("malformed or missing uses target blocks composition", () => {
++    const implementer = cards.find((c) => c.id.name === "implementer");
++    if (!implementer) throw new Error("fixture card missing");
++    for (const target of ["tdd", "methodology/missing"]) {
++      const modified = cards.map((card) =>
++        card === implementer
++          ? { ...card, frontmatter: { ...card.frontmatter, uses: [target] } }
++          : card
++      );
++      const r = compose(modified, ROOT, q(["implementer"]), knownTypes);
++      expect(r.errors.length).toBeGreaterThan(0);
++      expect(r.manifest).toBeUndefined();
++    }
++  });
+ });
+diff --git a/__tests__/fixtures/brain/methodology/tdd/references/cycle.md b/__tests__/fixtures/brain/methodology/tdd/references/cycle.md
+new file mode 100644
+index 0000000..51b7c4f
+--- /dev/null
++++ b/__tests__/fixtures/brain/methodology/tdd/references/cycle.md
+@@ -0,0 +1,3 @@
++# TDD Cycle
++
++Write a failing test, implement the minimum change, then refactor.
+diff --git a/__tests__/fixtures/brain/subagent/implementer/CORE.md b/__tests__/fixtures/brain/subagent/implementer/CORE.md
+new file mode 100644
+index 0000000..634fb82
+--- /dev/null
++++ b/__tests__/fixtures/brain/subagent/implementer/CORE.md
+@@ -0,0 +1,9 @@
++---
++description: "Implements a scoped change using reusable methodology cards."
++uses: [methodology/tdd]
++requires: [test]
++---
++
++# Implementer
++
++Apply the composed methodology and slot-filled implementation guidance.
+diff --git a/__tests__/fixtures/brain/subagent/security-reviewer/CORE.md b/__tests__/fixtures/brain/subagent/security-reviewer/CORE.md
+index ef145f5..a28dd5b 100644
+--- a/__tests__/fixtures/brain/subagent/security-reviewer/CORE.md
++++ b/__tests__/fixtures/brain/subagent/security-reviewer/CORE.md
+@@ -1,6 +1,5 @@
+ ---
+ description: "Domain-scoped security review of a diff partition."
+-model: sonnet
+ ---
+ 
+ # Security Reviewer
+diff --git a/__tests__/fixtures/brain/subagent/style-reviewer/CORE.md b/__tests__/fixtures/brain/subagent/style-reviewer/CORE.md
+index 6230755..7ccf525 100644
+--- a/__tests__/fixtures/brain/subagent/style-reviewer/CORE.md
++++ b/__tests__/fixtures/brain/subagent/style-reviewer/CORE.md
+@@ -1,6 +1,5 @@
+ ---
+ description: "Domain-scoped style review of a diff partition."
+-model: haiku
+ ---
+ 
+ # Style Reviewer
+diff --git a/__tests__/frontmatter.test.ts b/__tests__/frontmatter.test.ts
+index da70492..7ce81a3 100644
+--- a/__tests__/frontmatter.test.ts
++++ b/__tests__/frontmatter.test.ts
+@@ -43,24 +43,46 @@ describe("parseCore — frontmatter", () => {
+     expect(r.frontmatter.subagents).toEqual(["security-reviewer"]);
+   });
+ 
+-  test("subagent requires model", () => {
++  test("minimal subagent does not require model metadata", () => {
+     const r = parseCore(wrap(`description: "ok"`), "subagent");
+-    expect(r.errors.some((e) => e.includes("missing required field: model"))).toBe(
+-      true
+-    );
++    expect(r.errors).toEqual([]);
+   });
+ 
+-  test("subagent rejects bad model", () => {
++  test("subagent rejects model as harness-specific metadata", () => {
+     const r = parseCore(wrap(`description: "ok"\nmodel: o4-mini`), "subagent");
+-    expect(r.errors.some((e) => e.includes("unknown model: o4-mini"))).toBe(true);
++    expect(
++      r.errors.some((e) =>
++        e.includes("unknown frontmatter field for type 'subagent': model")
++      )
++    ).toBe(true);
++  });
++
++  test("subagent accepts canonical card IDs in uses", () => {
++    const r = parseCore(
++      wrap(`description: "ok"\nuses: [methodology/tdd, methodology/verification]`),
++      "subagent"
++    );
++    expect(r.errors).toEqual([]);
++    expect(r.frontmatter.uses).toEqual(["methodology/tdd", "methodology/verification"]);
++  });
++
++  test("uses must be an array of strings", () => {
++    const r = parseCore(wrap(`description: "ok"\nuses: methodology/tdd`), "subagent");
++    expect(r.errors.some((e) => e.includes("uses must be an array of strings"))).toBe(
++      true
++    );
+   });
+ 
+-  test("subagent accepts haiku/sonnet/opus", () => {
+-    for (const m of ["haiku", "sonnet", "opus"]) {
+-      const r = parseCore(wrap(`description: "ok"\nmodel: ${m}`), "subagent");
+-      expect(r.errors).toEqual([]);
+-      expect(r.frontmatter.model).toBe(m as "haiku" | "sonnet" | "opus");
+-    }
++  test("non-subagent rejects uses", () => {
++    const r = parseCore(
++      wrap(`description: "ok"\nuses: [methodology/tdd]`),
++      "methodology"
++    );
++    expect(
++      r.errors.some((e) =>
++        e.includes("unknown frontmatter field for type 'methodology': uses")
++      )
++    ).toBe(true);
+   });
+ 
+   test("aliases must be array of strings", () => {
+@@ -77,20 +99,8 @@ describe("parseCore — frontmatter", () => {
+     ).toBe(true);
+   });
+ 
+-  test("methodology rejects model field", () => {
+-    const r = parseCore(wrap(`description: "ok"\nmodel: opus`), "methodology");
+-    expect(
+-      r.errors.some((e) =>
+-        e.includes("unknown frontmatter field for type 'methodology': model")
+-      )
+-    ).toBe(true);
+-  });
+-
+   test("subagent rejects subagents field", () => {
+-    const r = parseCore(
+-      wrap(`description: "ok"\nmodel: opus\nsubagents: [foo]`),
+-      "subagent"
+-    );
++    const r = parseCore(wrap(`description: "ok"\nsubagents: [foo]`), "subagent");
+     expect(
+       r.errors.some((e) =>
+         e.includes("unknown frontmatter field for type 'subagent': subagents")
+diff --git a/__tests__/harness-guard.test.ts b/__tests__/harness-guard.test.ts
+new file mode 100644
+index 0000000..d54fc5a
+--- /dev/null
++++ b/__tests__/harness-guard.test.ts
+@@ -0,0 +1,45 @@
++import { describe, expect, test } from "bun:test";
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { findHarnessLeaks } from "../src/lib/harness-guard.ts";
++
++describe("harness guard", () => {
++  test("scans governed extensions and avoids ordinary words", () => {
++    const root = mkdtempSync(join(tmpdir(), "tagen-guard-"));
++    try {
++      const brain = join(root, "brain");
++      const card = join(brain, "methodology", "portable");
++      mkdirSync(join(card, "references"), { recursive: true });
++      mkdirSync(join(brain, "protocol", "wire"), { recursive: true });
++      writeFileSync(
++        join(card, "CORE.md"),
++        `---\ndescription: "Portable orchestration"\n---\nUse a worker.\n`
++      );
++      writeFileSync(
++        join(card, "references", "details.md"),
++        "Do not name the Task tool or PreToolUse.\n"
++      );
++      writeFileSync(
++        join(brain, "protocol", "wire", "schema.json"),
++        JSON.stringify({ description: "Claude Code payload" })
++      );
++      writeFileSync(
++        join(brain, "protocol", "wire", "validator.ts"),
++        "// claude-sonnet-4-6\n"
++      );
++
++      const leaks = findHarnessLeaks(brain, root, {
++        additionalTerms: [],
++        allow: [],
++      });
++      expect(leaks.some((leak) => leak.ruleId === "claude-tool-language")).toBe(true);
++      expect(leaks.some((leak) => leak.ruleId === "claude-hook-event")).toBe(true);
++      expect(leaks.some((leak) => leak.ruleId === "harness-name")).toBe(true);
++      expect(leaks.some((leak) => leak.ruleId === "vendor-model-id")).toBe(true);
++      expect(leaks.some((leak) => leak.path.endsWith("CORE.md"))).toBe(false);
++    } finally {
++      rmSync(root, { recursive: true, force: true });
++    }
++  });
++});
+diff --git a/__tests__/perf.test.ts b/__tests__/perf.test.ts
+index 2a3ba61..960eb4f 100644
+--- a/__tests__/perf.test.ts
++++ b/__tests__/perf.test.ts
+@@ -73,10 +73,7 @@ function generate100CardFixture(brain: string): void {
+   }
+   for (let i = 0; i < 10; i++) {
+     generators.push(() =>
+-      writeCard(brain, "subagent", `sub-${i}`, [
+-        `description: "sub ${i}"`,
+-        "model: sonnet",
+-      ])
++      writeCard(brain, "subagent", `sub-${i}`, [`description: "sub ${i}"`])
+     );
+   }
+   for (let i = 0; i < 5; i++) {
+diff --git a/__tests__/validate.test.ts b/__tests__/validate.test.ts
+index d87853b..9b5b163 100644
+--- a/__tests__/validate.test.ts
++++ b/__tests__/validate.test.ts
+@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ import { runValidate } from "../src/commands/validate.ts";
+ import { findBrainDir, loadAllCards, marketplaceRoot } from "../src/lib/catalog.ts";
+-import { knownTypesFromCards } from "../src/lib/compose.ts";
+ 
+ const FIXTURES = join(import.meta.dir, "fixtures");
+ const CLEAN_BRAIN = join(FIXTURES, "brain");
+@@ -12,9 +11,7 @@ const CLEAN_BRAIN = join(FIXTURES, "brain");
+ function makeContext(brainDir: string) {
+   const root = marketplaceRoot(brainDir);
+   const { cards, protocols, frontmatterErrors } = loadAllCards(brainDir);
+-  const knownTypes = knownTypesFromCards(cards);
+-  const index = new Map(cards.map((c) => [`${c.id.type}/${c.id.name}`, c] as const));
+-  return { cards, protocols, root, frontmatterErrors, knownTypes, index };
++  return { cards, protocols, root, frontmatterErrors };
+ }
+ 
+ const ORIG_EXIT = process.exit;
+@@ -126,7 +123,7 @@ describe("runValidate — broken cards", () => {
+     }
+   });
+ 
+-  test("subagent missing model", () => {
++  test("subagent without model is valid", () => {
+     const { brainDir, tearDown } = cloneFixture((b) => {
+       writeFileSync(
+         join(b, "subagent", "security-reviewer", "CORE.md"),
+@@ -135,14 +132,14 @@ describe("runValidate — broken cards", () => {
+     });
+     try {
+       const { stderr, exitCode } = runAndCapture(brainDir);
+-      expect(exitCode).toBe(1);
+-      expect(stderr).toContain("missing required field: model");
++      expect(exitCode).toBe(0);
++      expect(stderr).toBe("");
+     } finally {
+       tearDown();
+     }
+   });
+ 
+-  test("subagent bad model value", () => {
++  test("subagent model metadata is rejected", () => {
+     const { brainDir, tearDown } = cloneFixture((b) => {
+       writeFileSync(
+         join(b, "subagent", "security-reviewer", "CORE.md"),
+@@ -152,7 +149,173 @@ describe("runValidate — broken cards", () => {
+     try {
+       const { stderr, exitCode } = runAndCapture(brainDir);
+       expect(exitCode).toBe(1);
+-      expect(stderr).toContain("unknown model: gpt4");
++      expect(stderr).toContain("unknown frontmatter field for type 'subagent': model");
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("unknown card in uses", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      writeFileSync(
++        join(b, "subagent", "security-reviewer", "CORE.md"),
++        `---\ndescription: "x"\nuses: [methodology/missing]\n---\n# x\n`
++      );
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("unknown card in uses: methodology/missing");
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("malformed uses target", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      writeFileSync(
++        join(b, "subagent", "security-reviewer", "CORE.md"),
++        `---\ndescription: "x"\nuses: [tdd]\n---\n# x\n`
++      );
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("invalid uses target 'tdd'");
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("self use and uses cycles are rejected", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      writeFileSync(
++        join(b, "subagent", "security-reviewer", "CORE.md"),
++        `---\ndescription: "x"\nuses: [subagent/style-reviewer]\n---\n# x\n`
++      );
++      writeFileSync(
++        join(b, "subagent", "style-reviewer", "CORE.md"),
++        `---\ndescription: "x"\nuses: [subagent/security-reviewer]\n---\n# x\n`
++      );
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain(
++        "uses cycle: subagent/security-reviewer -> subagent/style-reviewer -> subagent/security-reviewer"
++      );
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("harness-specific content reports file line rule and token", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      writeFileSync(
++        join(b, "subagent", "security-reviewer", "CORE.md"),
++        `---\ndescription: "x"\n---\n# x\n\nRun this with Claude Code using the sonnet tier.\n`
++      );
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("harness leak [harness-name]: Claude Code");
++      expect(stderr).toContain("harness leak [vendor-model-tier]: sonnet");
++      expect(stderr).toContain("brain/subagent/security-reviewer/CORE.md:6");
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("guard config adds terms and narrowly allows rules", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      const root = join(b, "..");
++      mkdirSync(join(root, ".tagen"), { recursive: true });
++      writeFileSync(
++        join(root, ".tagen", "agnostic-guard.json"),
++        JSON.stringify({
++          version: 1,
++          additionalTerms: [
++            {
++              id: "local-harness",
++              term: "HarnessX",
++              caseSensitive: true,
++            },
++          ],
++          allow: [
++            {
++              pathPrefix: "brain/architecture/cli/",
++              rules: ["local-harness"],
++            },
++          ],
++        })
++      );
++      writeFileSync(
++        join(b, "architecture", "cli", "CORE.md"),
++        `---\ndescription: "HarnessX comparison"\n---\n# HarnessX\n`
++      );
++      writeFileSync(
++        join(b, "lang", "rust", "CORE.md"),
++        `---\ndescription: "HarnessX patterns"\n---\n# Rust\n`
++      );
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).not.toContain("brain/architecture/cli/CORE.md");
++      expect(stderr).toContain(
++        "brain/lang/rust/CORE.md:2: harness leak [local-harness]: HarnessX"
++      );
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("invalid guard config is a validation failure", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      const root = join(b, "..");
++      mkdirSync(join(root, ".tagen"), { recursive: true });
++      writeFileSync(
++        join(root, ".tagen", "agnostic-guard.json"),
++        JSON.stringify({
++          version: 1,
++          allow: [{ pathPrefix: "../plugins/", rules: ["harness-name"] }],
++        })
++      );
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain("pathPrefix must stay under brain/");
++    } finally {
++      tearDown();
++    }
++  });
++
++  test("additional guard terms cannot replace built-in rules", () => {
++    const { brainDir, tearDown } = cloneFixture((b) => {
++      const root = join(b, "..");
++      mkdirSync(join(root, ".tagen"), { recursive: true });
++      writeFileSync(
++        join(root, ".tagen", "agnostic-guard.json"),
++        JSON.stringify({
++          version: 1,
++          additionalTerms: [
++            {
++              id: "harness-name",
++              term: "anything",
++              caseSensitive: false,
++            },
++          ],
++        })
++      );
++    });
++    try {
++      const { stderr, exitCode } = runAndCapture(brainDir);
++      expect(exitCode).toBe(1);
++      expect(stderr).toContain(
++        "additionalTerms[0].id conflicts with built-in rule 'harness-name'"
++      );
+     } finally {
+       tearDown();
+     }
+@@ -168,7 +331,7 @@ describe("runValidate — broken cards", () => {
+     try {
+       const { stderr, exitCode } = runAndCapture(brainDir);
+       expect(exitCode).toBe(1);
+-      expect(stderr).toContain("dotnet: collides between");
++      expect(stderr).toContain("alias 'dotnet' collides between");
+     } finally {
+       tearDown();
+     }
+diff --git a/docs/plans/v3.0.0-harness-agnostic-brain.md b/docs/plans/v3.0.0-harness-agnostic-brain.md
+new file mode 100644
+index 0000000..d6488f6
+--- /dev/null
++++ b/docs/plans/v3.0.0-harness-agnostic-brain.md
+@@ -0,0 +1,474 @@
++# tagen v3.0.0 — harness-agnostic brain
++
++> Status: implemented and verified locally — 2026-06-19.
++> Scope: GitHub issues #37 and #38 plus the qsm-marketplace migration required
++> to prove them against a real catalog.
++
++## Outcome
++
++Make `brain/` portable across Claude Code, Codex, and future harnesses:
++
++- `tagen` no longer requires or understands vendor model names.
++- `tagen validate` rejects harness-specific implementation details in `brain/`.
++- subagent cards can declare concrete reusable ingredients with `uses:`.
++- `requires:` keeps its existing dynamic type-slot semantics.
++- the manifest remains a harness-neutral path contract.
++
++This is v3 because existing subagent cards containing `model:` become invalid,
++and `tagen get` gains new composition semantics through `uses:`.
++
++## Non-goals
++
++- Do not make `plugins/`, `tools/`, `.claude-plugin/`, or Claude hooks
++  harness-neutral. They are Claude Code adapters and delivery surfaces.
++- Do not add Codex registration or installation behavior to `tagen`.
++- Do not rename `subagent` / `subagents` in v3. The term describes a portable
++  worker role; changing it would break the manifest without removing concrete
++  vendor coupling.
++- Do not recursively resolve `uses:` or `requires:`.
++- Do not add a general tagen configuration system.
++- Do not read tool/plugin manifests during composition.
++
++## Locked design decisions
++
++### 1. Remove `model:` completely
++
++`model:` is not optional in the neutral schema; it is unsupported.
++
++- Remove it from `CardFrontmatter`.
++- Remove the `Model` type and Claude model constants.
++- Remove the `tagen add` model prompt.
++- Remove it from subagent fixtures.
++- Because the subagent allowlist no longer includes `model`, any remaining
++  `model:` field fails as an unknown frontmatter field.
++
++WHY: accepting the field preserves a vendor-specific escape hatch in the
++canonical content. Model selection belongs in each harness adapter.
++
++### 2. Add `uses:` to subagent cards only
++
++```yaml
++---
++description: "Implements a scoped task."
++uses: [methodology/tdd, methodology/verification, methodology/task-management]
++requires: [lang, test]
++---
++```
++
++- Values are canonical `<type>/<name>` card IDs, not aliases or bare names.
++- An ID must resolve to exactly one card in the catalog.
++- Missing or malformed IDs are errors.
++- `uses:` on a non-subagent card is an unknown-field validation error in v3.
++- Self-use is invalid.
++
++WHY: `uses:` expresses a concrete ingredient list. `requires:` remains a
++dynamic slot request whose filler is selected by the query.
++
++Restricting v3 to subagents keeps the behavior aligned with the concrete
++worker use case in issue #37. Broader card support needs a separate use case.
++
++### 3. One-level expansion uses only the seed set
++
++Composition order:
++
++1. Resolve fuzzy and explicit query arguments into the seed matched set.
++2. For each seed subagent, resolve its direct `uses:` canonical IDs.
++3. Add those direct cards to the matched set and deduplicate by `<type>/<name>`.
++4. Do not follow `uses:` declared by an added card.
++5. Collect `requires:` from the full expanded set.
++6. Run the existing slot-fill algorithm unchanged.
++7. Build the manifest from the expanded set.
++
++Consequences:
++
++- Used cards appear in `modules`.
++- Used non-filler cards appear in `core` and contribute references.
++- Used cards contribute `requires:` slots.
++- Existing `filled`, `slots`, `subagents`, and `validators` behavior applies to
++  the expanded set.
++- The manifest schema does not need a new field.
++
++WHY: this gives concrete workers their declared ingredients while preserving
++the deliberate no-deep-transitive-resolution rule.
++
++### 4. Validate cycles in the concrete `uses:` graph
++
++Reject self-cycles in the v3 schema:
++
++```text
++subagent/a uses subagent/a
++```
++
++In v3, only subagent cards can declare `uses:` and one-level expansion does not
++follow an added subagent's own `uses:`, so self-use is the only reachable
++runtime cycle. Keep the graph helper generic enough to report multi-card cycles
++if `uses:` is broadened later.
++
++Do not claim that `requires:` participates in a static card-cycle check.
++`requires:` points to a type, not a card; its concrete filler exists only for a
++specific query, and the resolver does not recursively traverse it. Expanding a
++type edge to every card of that type would create false cycles unrelated to
++runtime behavior.
++
++This intentionally narrows issue #37's "requires + uses graph" acceptance
++criterion to the graph that has concrete, enforceable semantics.
++
++### 5. Add a dedicated harness guard
++
++`tagen validate` scans harness-neutral catalog files and reports:
++
++```text
++brain/review/strict/CORE.md:37: harness leak [vendor-model-tier]: haiku
++```
++
++Default scan scope:
++
++- every `CORE.md`
++- markdown under `references/`
++- protocol `schema.json`
++- protocol/card validator TypeScript
++- JSON examples
++
++Use a recursive text-file walker with an explicit extension set:
++`.md`, `.json`, `.ts`, `.yaml`, `.yml`, `.toml`.
++
++Initial built-in rule groups:
++
++- `vendor-model-tier`: `haiku`, `sonnet`, `opus`
++- `vendor-model-id`: concrete Claude, GPT, Gemini model identifiers
++- `claude-hook-event`: `PreToolUse`, `PostToolUse`, `SubagentStop`, and other
++  Claude Code lifecycle event names
++- `claude-path`: `.claude/`, `.claude-plugin/`, `CLAUDE_PLUGIN_ROOT`
++- `claude-command`: Claude-only slash commands such as `/plugin` and `/mcp`
++- `claude-tool-language`: explicit phrases such as `Task tool` where they name
++  a harness mechanism rather than a portable role
++
++Rules must use bounded, case-aware patterns to avoid matching ordinary words.
++Each finding includes relative file, line, rule id, and matched token.
++
++### 6. Keep guard configuration narrow and explicit
++
++Optional file:
++
++```text
++<marketplace-root>/.tagen/agnostic-guard.json
++```
++
++Versioned shape:
++
++```json
++{
++  "version": 1,
++  "additionalTerms": [
++    {
++      "id": "local-harness-token",
++      "term": "ExampleHarnessEvent",
++      "caseSensitive": true
++    }
++  ],
++  "allow": [
++    {
++      "pathPrefix": "brain/architecture/agents-readme/",
++      "rules": ["claude-path"]
++    }
++  ]
++}
++```
++
++Rules:
++
++- Configuration is optional; built-ins work without it.
++- `additionalTerms` only adds literal project-specific tokens.
++- `allow` requires a path prefix and explicit rule ids.
++- No global "disable all" switch.
++- Unknown keys, duplicate ids, unknown allowed rule ids, malformed JSON, and
++  path prefixes outside `brain/` are validation failures.
++- Allowances suppress only the named rule under the named path.
++
++WHY: intentional comparative documentation may mention harnesses, but every
++exception must be visible and narrow. A general regex/config engine would make
++the guard easy to disable and violate convention-over-configuration.
++
++## tagen implementation map
++
++### Data model and parsing
++
++Files:
++
++- `src/lib/types.ts`
++- `src/lib/frontmatter.ts`
++
++Changes:
++
++- Delete `MODELS`, `Model`, and `CardFrontmatter.model`.
++- Add `CardFrontmatter.uses?: string[]`.
++- Add `uses` only to the subagent field allowlist.
++- Parse it with the same string-array validation used by aliases/requires.
++- Keep raw source or add catalog text discovery separately for harness scans.
++
++### Named-card resolution
++
++New file:
++
++- `src/lib/card-references.ts`
++
++Responsibilities:
++
++- Validate and resolve canonical `<type>/<name>` IDs.
++- Return deterministic malformed/unresolved diagnostics.
++- Detect and render `uses:` cycles.
++
++Do not overload alias resolution: `uses:` is canonical identity, while aliases
++are query ergonomics.
++
++### Composition
++
++File:
++
++- `src/lib/compose.ts`
++
++Changes:
++
++- After seed matching, call a pure one-level expansion helper.
++- Surface malformed/unresolved `uses:` as composition errors as defense in
++  depth, even if `validate` was skipped.
++- Collect `requires:` and build all manifest fields from the expanded set.
++- Preserve deterministic type/name sorting and deduplication.
++
++### Validation
++
++Files:
++
++- `src/commands/validate.ts`
++- new `src/lib/harness-guard.ts`
++- new `src/lib/agnostic-config.ts`
++
++Changes:
++
++- Validate each `uses:` reference.
++- Validate the concrete `uses:` graph is acyclic.
++- Load and validate optional guard configuration from marketplace root.
++- Scan governed text files and append every harness leak.
++- Keep all checks aggregate; never fast-fail.
++
++### Interactive scaffold
++
++File:
++
++- `src/commands/add.ts`
++
++Changes:
++
++- Remove the model prompt and model output.
++- Prompt subagent cards for optional `uses:` canonical IDs.
++- Add `uses` to `ScaffoldArgs`.
++
++### CLI wiring
++
++File:
++
++- `src/main.ts`
++
++Changes:
++
++- Load guard configuration only for `validate`.
++- Pass marketplace root/config into the validation context.
++- Do not make `list`, `get`, or `add` depend on config loading.
++
++### Manifest contract
++
++Files:
++
++- `src/lib/types.ts`
++- `docs/tagen-get-manifest.schema.json`
++
++Expected result:
++
++- No structural schema change.
++- Contract fixtures change because `modules`, `core`, references, slots,
++  subagents, and validators may include direct `uses:` expansions.
++- Keep a schema-contract test proving the emitted shape remains valid.
++
++## Test-first order
++
++### Phase 1 — remove model coupling
++
++Update/add tests:
++
++- minimal subagent without `model:` parses cleanly
++- `model:` on a subagent is rejected as an unknown field
++- scaffolded subagent contains no model
++- catalog fixtures load without model metadata
++- performance fixture contains no model
++
++Then remove model code.
++
++### Phase 2 — parse and validate `uses:`
++
++Add tests:
++
++- subagent accepts `uses: string[]`
++- wrong-type `uses:` fails
++- non-subagent `uses:` fails
++- known unique name passes
++- malformed ID fails with owner and target
++- missing ID fails with owner and target
++- self-use fails
++- multi-card `uses:` cycle reports the path
++
++Then implement parsing and reference helpers.
++
++### Phase 3 — composition expansion
++
++Fixture:
++
++- add a concrete subagent using `tdd` and another methodology
++- give one used methodology a `requires: [lang]`
++
++Add tests:
++
++- querying the subagent adds direct used cards to `modules`
++- used cards appear in `core` and references
++- used-card `requires:` participates in slot fill
++- duplicate direct uses deduplicate
++- a used card's own `uses:` is not followed
++- explicit and fuzzy seed paths behave identically
++- malformed/unresolved use blocks `get`
++- manifest still validates against JSON Schema
++- BDD scenario covers the user-visible `get` behavior
++
++Then implement expansion.
++
++### Phase 4 — harness guard
++
++Add isolated tests:
++
++- each built-in rule group reports file, line, id, token
++- ordinary terms do not false-positive
++- scanning includes CORE, references, protocol JSON, and validator TS
++- multiple leaks aggregate
++- valid config adds a local term
++- exact path-prefix/rule allowance suppresses only that rule
++- malformed/unknown config fields fail
++- allowances outside `brain/` fail
++- clean neutral fixture passes
++- BDD scenario covers `tagen validate` failure on a harness leak
++
++Then implement config loading and scanning.
++
++### Phase 5 — documentation and package metadata
++
++Files:
++
++- `README.md`
++- `CLAUDE.md`
++- `docs/specs/SPEC-tagen.md`
++- `package.json`
++
++Changes:
++
++- Document five frontmatter fields:
++  `description`, `aliases`, `requires`, `uses`, `subagents`; `model` removed.
++- Document seed → one-level uses expansion → requires slot-fill.
++- Remove Claude-tier dispatch instructions.
++- Document guard rules/configuration and explicit exceptions.
++- Update package description/keywords from Claude plugin assembly to
++  harness-neutral context composition.
++- State the corrected cycle semantics.
++
++## qsm-marketplace migration
++
++This is a separate repository change after local tagen tests pass.
++
++### Mechanical migration
++
++- Remove `model:` from all current `brain/subagent/*/CORE.md` cards. Current
++  remote main has nine such cards, not the four named in issue #38.
++- Replace `haiku` / `sonnet` / `opus` prose in strict review and protocol
++  descriptions with portable execution characteristics:
++  `fast recon`, `deep domain review`, `high-confidence validation`.
++- Update qsm-builder brain-card guidance and frontmatter references.
++- Update marketplace README and qsm-tagen docs to the actual v3 CLI/schema.
++
++### `uses:` migration
++
++- Add concrete `uses:` only where a worker has a stable ingredient list.
++- Remove corresponding in-body `tagen get ...` ingredient prose.
++- Keep dynamic `lang`, `test`, `framework`, `protocol`, and review selection in
++  `requires:` where the query/orchestrator chooses the filler.
++- Do not invent cards mentioned by the issues if they are not on current main;
++  migrate the catalog that actually exists at implementation time.
++
++### Harness-content migration
++
++Classify every guard finding:
++
++1. Generic methodology with Claude wording → rewrite to portable role/event
++   language.
++2. Claude adapter implementation detail → move to `plugins/` or `tools/`.
++3. Intentionally comparative architecture documentation → retain only with a
++   narrow checked-in guard allowance.
++
++Do not blanket-allow `brain/`; every retained exception needs a path and rule id.
++
++### Proof
++
++Run the unreleased tagen source directly from qsm-marketplace:
++
++```bash
++bun run ../tagen/src/main.ts validate
++bun run ../tagen/src/main.ts get <representative-worker> csharp xunit --json
++```
++
++Then run marketplace tests, typecheck, Biome, and project markdownlint.
++
++## Verification gates
++
++In `tagen/`:
++
++```bash
++bun test
++bun run typecheck
++bun run lint
++```
++
++In `qsm-marketplace2/`, against local tagen source:
++
++```bash
++bun run ../tagen/src/main.ts validate
++bun test
++bun run typecheck
++bun run lint
++```
++
++Additional acceptance:
++
++- no `model:` remains under `brain/`
++- no unallowed harness-guard findings remain
++- representative worker composition proves direct `uses:` expansion
++- a used methodology's `requires:` slot is filled from the query
++- manifest contract test remains green
++
++## Worktree and commit strategy
++
++The current tagen worktree already contains unrelated uncommitted refactoring
++(shared alias collision logic, shared card indexing, validation cleanup). Do
++not overwrite or silently fold it into v3 work.
++
++Before implementation:
++
++1. Confirm those edits are intended.
++2. Either commit them as a standalone refactor or create the v3 branch from a
++   clean equivalent baseline.
++3. Implement phases in test-first commits.
++4. Publish/link tagen only after its full suite passes.
++5. Migrate qsm-marketplace in its own branch and repository history.
++
++Suggested commits:
++
++1. `refactor: centralize card indexes and alias validation` (existing work)
++2. `test: define harness-neutral subagent frontmatter`
++3. `feat: add one-level uses composition`
++4. `feat: validate harness-neutral brain content`
++5. `docs: specify harness-neutral brain contract`
++6. marketplace: `refactor(brain): remove harness-specific execution metadata`
+diff --git a/docs/specs/SPEC-tagen.md b/docs/specs/SPEC-tagen.md
+index 9e34b6a..6cb2add 100644
+--- a/docs/specs/SPEC-tagen.md
++++ b/docs/specs/SPEC-tagen.md
+@@ -99,7 +99,7 @@ brain/
+ ├── framework/<name>/               # CORE.md, references/
+ ├── test/<name>/                    # CORE.md, references/
+ ├── architecture/<name>/            # CORE.md, references/
+-├── subagent/<name>/                # CORE.md (frontmatter has model: haiku|sonnet|opus)
++├── subagent/<name>/                # CORE.md; may declare uses: [type/name]
+ └── protocol/<name>/                # CORE.md, schema.json, validator.ts, examples/{valid,invalid}/
+                                     # (protocol cards self-check at validate time;
+                                     #  no other card references them.)
+@@ -138,7 +138,7 @@ description: "One-line summary. Required."
+ aliases: [dotnet]                  # optional; query-time alternate names; globally unique
+ requires: [lang]                   # optional; type names this card needs slot-filled
+ subagents: [security-reviewer]     # review/methodology only; names of subagents this card dispatches
+-model: sonnet                      # subagent only; haiku | sonnet | opus
++uses: [methodology/tdd]            # subagent only; direct canonical card IDs
+ ---
+ 
+ # Body — short and dense. Orchestration of subagents (order, parallel/sequential,
+@@ -146,7 +146,7 @@ model: sonnet                      # subagent only; haiku | sonnet | opus
+ # just lists which subagents this card uses.
+ ```
+ 
+-Five fields total: `description`, `aliases`, `requires`, `subagents`, `model`. Anything else in frontmatter is rejected by `tagen validate`.
++Five fields total: `description`, `aliases`, `requires`, `uses`, `subagents`. `uses` is subagent-only; `subagents` is review/methodology-only. Anything else in frontmatter is rejected by `tagen validate`.
+ 
+ ---
+ 
+@@ -198,7 +198,7 @@ Exit codes: 0 (clean), 1 (violations), 2 (brain/ not found).
+ 
+ ### `tagen add`
+ 
+-Interactive scaffold for a new card. Prompts for type, name, description, then type-appropriate optional fields (`aliases`, `requires`, `subagents` on review/methodology, `model` on subagent). Creates `brain/<type>/<name>/CORE.md` with the frontmatter, plus an empty `references/` directory.
++Interactive scaffold for a new card. Prompts for type, name, description, then type-appropriate optional fields (`aliases`, `requires`, `subagents` on review/methodology, `uses` on subagent). Creates `brain/<type>/<name>/CORE.md` with the frontmatter, plus an empty `references/` directory.
+ 
+ ```
+ tagen add
+@@ -233,8 +233,10 @@ Used by `tagen get`.
+      - --type T --name N pairs → exact (type, name).
+      - --pin <type>=<name> → recorded for slot resolution.
+    Sort matched set alphabetically by (type, name).
+-4. Collect requires from matched set: union of all `requires:` arrays.
+-5. For each required type T:
++4. For each seed subagent, add its direct `uses:` cards to the matched set.
++   Values are canonical `<type>/<name>` IDs. Expansion is one level only.
++5. Collect requires from the expanded matched set: union of all `requires:` arrays.
++6. For each required type T:
+      candidates = matched cards under brain/T/
+      pinned = cards in candidates whose name == --pin T=<name> (if any --pin T=… was given)
+      if pinned: chosen = pinned[0]
+@@ -242,19 +244,19 @@ Used by `tagen get`.
+      else: warning "unfilled slot for type T"
+      append { type: T, fillerCard: chosen.name, candidates: candidates.names } to slots[]
+      if len(candidates) > 1: warning "multiple candidates for type T: <list>. Picked <chosen>. Use --pin T=<name> to override."
+-6. For each card in matched set: resolve its references:
++7. For each card in matched set: resolve its references:
+      for each file under <card-dir>/references/<topic>.md:
+        append to that card's references[] list in the manifest
+-7. Resolve subagents: for every review/methodology card in the matched set, read its
++8. Resolve subagents: for every review/methodology card in the matched set, read its
+    `subagents:` frontmatter array. Union the names across cards. For each name, resolve to
+    `brain/subagent/<name>/CORE.md`. If a name doesn't resolve, warning "unknown subagent: <name>
+    referenced by <card>".
+-8. Resolve card validators: for review/methodology cards in the matched set,
++9. Resolve card validators: for review/methodology cards in the matched set,
+    list <card-dir>/validators/*.ts.
+-9. Set `root` = the absolute path of the marketplace dir tagen discovered.
+-10. Assemble manifest with all paths root-relative (see contract below).
+-11. Output JSON to stdout. Warnings to stderr.
+-12. Exit 0 (warnings ok), 1 (validation error), 2 (no matches).
++10. Set `root` = the absolute path of the marketplace dir tagen discovered.
++11. Assemble manifest with all paths root-relative (see contract below).
++12. Output JSON to stdout. Warnings to stderr.
++13. Exit 0 (warnings ok), 1 (validation error), 2 (no matches).
+ ```
+ 
+ ---
+@@ -323,7 +325,7 @@ All paths in the manifest are relative to the top-level `root` field — the abs
+ | `references` | string[] | Reference file paths from non-filler cards. Pull-on-demand; agent reads them only if the task warrants it. |
+ | `filled` | object keyed by type | One entry per slot the methodology required. Each entry has `core` (load immediately) and `references` (pull-on-demand). |
+ | `slots` | array | Slot resolution metadata: type, chosen filler, all candidates. |
+-| `subagents` | string[] | Paths to CORE.md files of subagents the matched methodology dispatches. Agent reads each subagent's CORE.md for its `model:` (which Claude tier to invoke) and body (role + how the methodology calls it). The methodology's CORE.md owns dispatch orchestration. |
++| `subagents` | string[] | Paths to CORE.md files of workers the matched methodology dispatches. Harness adapters choose execution models; the methodology owns portable orchestration. |
+ | `validators` | string[] | Paths to card-level validator scripts on review/methodology cards. The methodology decides when and what to pipe through them. |
+ | `warnings` | string[] | Non-fatal composition warnings. |
+ 
+@@ -335,7 +337,7 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
+ 2. Load `core[]` files immediately (the methodology body — orchestration of subagents lives here).
+ 3. For each entry in `filled{}`: load `core` immediately. Decide per-task which `references` to pull.
+ 4. The methodology's CORE.md tells the agent **how** to dispatch each subagent in `subagents[]` (order, parallel vs sequential, what input to pass). The manifest just lists which subagent files to consult; tagen does not encode orchestration.
+-5. Dispatch a subagent by reading its CORE.md (frontmatter `model:` for which Claude tier to invoke; body for the role and how the methodology calls it) and invoking it with the input the methodology specifies.
++5. Dispatch a subagent by reading its CORE.md for the portable role and input contract. The active harness adapter chooses its execution model and invocation mechanism.
+ 6. The methodology's CORE.md says when (and whether) to run any of the scripts in `validators[]` against its outputs.
+ 7. Read `warnings[]` first; decide whether to proceed partial or abort.
+ 
+@@ -373,6 +375,10 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
+ | `requires:` value not a known type (no matching `brain/<value>/` dir) | `<card>: unknown type in requires: <value>` |
+ | `subagents:` value not a known subagent (no `brain/subagent/<value>/CORE.md`) | `<card>: unknown subagent in subagents: <value>` |
+ | `subagents:` declared on a card outside `brain/review/` or `brain/methodology/` | `<card>: subagents allowed only on review and methodology cards` |
++| `uses:` value is not `<type>/<name>` | `<card>: invalid uses target '<value>', expected <type>/<name>` |
++| `uses:` target does not exist | `<card>: unknown card in uses: <type>/<name>` |
++| `uses:` declared outside `brain/subagent/` | `<card>: unknown frontmatter field for type '<type>': uses` |
++| `uses:` graph contains a cycle | `uses cycle: <card> -> <card> -> ...` |
+ 
+ ### Alias rules
+ 
+@@ -382,12 +388,13 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
+ | Alias matches a canonical name | `<alias>: collides with canonical name <type>/<name>` |
+ | Alias is not a string | `<card>: aliases must be an array of strings` |
+ 
+-### Subagent rules
++### Harness-neutrality rules
+ 
+-| Rule | Error |
+-|------|-------|
+-| Subagent missing `model:` frontmatter | `subagent/<name>: missing required field: model` |
+-| Subagent `model:` not in [haiku, sonnet, opus] | `subagent/<name>: unknown model: <value>` |
++`tagen validate` scans card Markdown, references, protocol JSON, examples, and
++validator TypeScript. It rejects vendor model names, harness names, Claude Code
++lifecycle events, `.claude` paths, and harness-only commands. Findings include
++file, line, rule ID, and token. Optional narrow exceptions and additional local
++terms live in `<root>/.tagen/agnostic-guard.json`.
+ 
+ ### Protocol rules
+ 
+@@ -428,8 +435,8 @@ export interface CardFrontmatter {
+   description: string;
+   aliases?: string[];
+   requires?: CardType[];
++  uses?: string[];                       // subagent only; canonical type/name IDs
+   subagents?: string[];                  // review/methodology only
+-  model?: "haiku" | "sonnet" | "opus";   // subagent only
+ }
+ 
+ export interface Card {
+@@ -624,7 +631,7 @@ Each row: chose **X** over **Y** because **Z**. The Z is what tagen would lose i
+ | Aliases in card frontmatter | Separate `aliases.yaml` / symlinks | Colocated with the canonical card; one place to look when debugging. Symlinks break on Windows and confuse git diffs; separate YAML drifts. |
+ | Read-only by default; only `tagen add` writes | All commands writable | Agents can run query commands repeatedly without disk-mutation risk. Side effects are isolated to one explicit command. |
+ | No versioning anywhere | `@v1` suffixes / migration shims / parallel old+new | Single-maintainer closed catalog. Renames in place; one PR updates every reference. Versioning pays only for external consumers we don't have. |
+-| No transitive auto-resolution of `requires:` | Auto-pull cards from outside the matched set | Tagen sees only the dir tree and frontmatter. The agent sees task context. Auto-pulling drags in modules the user didn't ask for; manual resolution lets the smarter system decide. |
++| One-level `uses:` plus no transitive `requires:` resolution | Recursive dependency expansion | Concrete workers can name stable ingredients without turning tagen into a recursive package resolver. Dynamic type slots remain chosen by the query. |
+ | Hand-maintained `marketplace.json` | Generated from `tools/*/plugin.json` | 15–20 tool plugins; listing by hand is trivial. Generation introduces drift, race conditions, and a build step that can fail. |
+ | `yaml` as only runtime dep | Adding `ajv`, `chalk`, `commander`, etc. | Tagen is offline and minimal. Schema validation is the consuming marketplace's dep, not tagen's. CLI argument parsing is small enough to write by hand. |
+ | Tools live in `tools/`, not `brain/` | Folding installable plugins into `brain/` | Installable CC plugins are a different concern from compose-into-methodology content. `brain/` is read by tagen at composition time; `tools/` is read by Claude Code at install time. Two readers, two roots. |
+diff --git a/features/get.feature b/features/get.feature
+index 5e60b86..65f0a3b 100644
+--- a/features/get.feature
++++ b/features/get.feature
+@@ -38,3 +38,12 @@ Feature: tagen get — resolve a composition into a JSON manifest
+     Then it exits 0
+     And stdout is valid JSON
+     And the lang slot is filled by python
++
++  Scenario: subagent uses expands concrete cards before slot filling
++    Given the canonical fixture brain
++    When I run tagen with args get implementer csharp bun-test --json
++    Then it exits 0
++    And stdout is valid JSON
++    And manifest.modules contains a card methodology/tdd
++    And the lang slot is filled by csharp
++    And the test slot is filled by bun-test
+diff --git a/features/steps/common.steps.ts b/features/steps/common.steps.ts
+index 229716b..52a1b02 100644
+--- a/features/steps/common.steps.ts
++++ b/features/steps/common.steps.ts
+@@ -1,4 +1,6 @@
+ import { expect } from "bun:test";
++import { writeFileSync } from "node:fs";
++import { join } from "node:path";
+ import { After, Before, Given, Then, When } from "@questi0nm4rk/feats";
+ import {
+   cloneFixtureBrain,
+@@ -36,6 +38,13 @@ Given<TaGenWorld>(
+   }
+ );
+ 
++Given<TaGenWorld>("a card contains harness-specific content", (world: TaGenWorld) => {
++  writeFileSync(
++    join(world.cwd, "brain", "subagent", "security-reviewer", "CORE.md"),
++    `---\ndescription: "x"\n---\n# x\n\nUse Claude Code.\n`
++  );
++});
++
+ // ─── When ─────────────────────────────────────────────────────────────────────
+ 
+ When<TaGenWorld>(
+diff --git a/features/validate.feature b/features/validate.feature
+index f84124c..49f35aa 100644
+--- a/features/validate.feature
++++ b/features/validate.feature
+@@ -12,3 +12,10 @@ Feature: tagen validate — every rule, every violation, never fast-fails
+     Then it exits 0
+     And stderr contains "scanned"
+     And stderr contains "violation(s)"
++
++  Scenario: harness-specific content fails validation
++    Given a temporary brain dir copied from the canonical fixture
++    And a card contains harness-specific content
++    When I run tagen with args validate
++    Then it exits 1
++    And stderr contains "harness leak"
+diff --git a/package.json b/package.json
+index f8fd8f5..7138e3c 100644
+--- a/package.json
++++ b/package.json
+@@ -1,15 +1,13 @@
+ {
+   "name": "@questi0nm4rk/tagen",
+-  "version": "2.0.0",
+-  "description": "Skill-graph CLI — assemble Claude Code plugins from tagged catalog cards",
++  "version": "3.0.0",
++  "description": "Harness-agnostic context graph CLI for composable brain cards",
+   "keywords": [
+-    "claude-code",
+-    "claude-plugins",
+-    "skill-graph",
+-    "plugin-builder",
++    "agent-context",
++    "context-graph",
++    "harness-agnostic",
++    "prompt-composition",
+     "ai-workflow",
+-    "claude",
+-    "anthropic",
+     "markdown",
+     "yaml"
+   ],
+diff --git a/src/commands/add.ts b/src/commands/add.ts
+index 19501ab..3b96697 100644
+--- a/src/commands/add.ts
++++ b/src/commands/add.ts
+@@ -11,8 +11,6 @@ import {
+ 
+ type RL = ReturnType<typeof createInterface>;
+ 
+-const VALID_MODELS = ["haiku", "sonnet", "opus"] as const;
+-
+ export interface AddStreams {
+   input?: Readable;
+   output?: Writable;
+@@ -69,15 +67,12 @@ export async function runAdd(
+       );
+     }
+ 
+-    let model: (typeof VALID_MODELS)[number] | undefined;
++    let uses: string[] = [];
+     if (type === "subagent") {
+-      const answer = await ask(rl, `Model (${VALID_MODELS.join(" / ")}): `);
+-      if (!isValidModel(answer)) {
+-        return abort(
+-          `Invalid model '${answer}': must be one of ${VALID_MODELS.join(", ")}`
+-        );
+-      }
+-      model = answer;
++      uses = await askList(
++        rl,
++        "Uses (canonical type/name IDs, comma-separated, optional): "
++      );
+     }
+ 
+     const cardDir = join(brainDir, type, name);
+@@ -94,8 +89,8 @@ export async function runAdd(
+         description,
+         aliases,
+         requires,
++        uses,
+         subagents,
+-        model,
+       })
+     );
+     process.stdout.write(`\nCreated: ${corePath}\n`);
+@@ -110,8 +105,8 @@ export interface ScaffoldArgs {
+   description: string;
+   aliases: string[];
+   requires: string[];
++  uses: string[];
+   subagents: string[];
+-  model?: "haiku" | "sonnet" | "opus";
+ }
+ 
+ export function scaffoldCard(a: ScaffoldArgs): string {
+@@ -119,8 +114,8 @@ export function scaffoldCard(a: ScaffoldArgs): string {
+   lines.push(`description: "${a.description.replace(/"/g, '\\"')}"`);
+   if (a.aliases.length > 0) lines.push(`aliases: [${a.aliases.join(", ")}]`);
+   if (a.requires.length > 0) lines.push(`requires: [${a.requires.join(", ")}]`);
++  if (a.uses.length > 0) lines.push(`uses: [${a.uses.join(", ")}]`);
+   if (a.subagents.length > 0) lines.push(`subagents: [${a.subagents.join(", ")}]`);
+-  if (a.model) lines.push(`model: ${a.model}`);
+   lines.push("---", "", `# ${a.name}`, "", a.description, "");
+   return lines.join("\n");
+ }
+@@ -138,10 +133,6 @@ async function askList(rl: RL, question: string): Promise<string[]> {
+     .filter(Boolean);
+ }
+ 
+-function isValidModel(s: string): s is (typeof VALID_MODELS)[number] {
+-  return (VALID_MODELS as readonly string[]).includes(s);
+-}
+-
+ function abort(msg: string): never {
+   process.stderr.write(`${msg}\n`);
+   process.exit(1);
+diff --git a/src/commands/validate.ts b/src/commands/validate.ts
+index 3a9ad1d..55bf1fc 100644
+--- a/src/commands/validate.ts
++++ b/src/commands/validate.ts
+@@ -1,9 +1,14 @@
+ import { existsSync, readFileSync, statSync } from "node:fs";
+ import Ajv, { type ValidateFunction } from "ajv";
+ import Ajv2020 from "ajv/dist/2020.js";
++import { loadAgnosticConfig } from "../lib/agnostic-config.ts";
++import { findAliasCollisions } from "../lib/aliases.ts";
++import { findUsesCycles, resolveUses } from "../lib/card-references.ts";
+ import { bodyLineCount } from "../lib/frontmatter.ts";
++import { BUILT_IN_RULE_IDS, findHarnessLeaks } from "../lib/harness-guard.ts";
+ import {
+   type Card,
++  cardIndex,
+   cardKey,
+   KEBAB_NAME,
+   type Protocol,
+@@ -14,17 +19,13 @@ export interface ValidateOptions {
+   verbose: boolean;
+ }
+ 
+-interface ValidationContext {
++export interface ValidationContext {
+   cards: Card[];
+   protocols: Protocol[];
+   /** Absolute marketplace root (parent of brain/). Used to read disk paths. */
+   root: string;
+   /** Frontmatter parse errors keyed by `<type>/<name>`. */
+   frontmatterErrors: Map<string, string[]>;
+-  /** Set of every type dir name under brain/. */
+-  knownTypes: Set<string>;
+-  /** Index keyed by `<type>/<name>`. */
+-  index: Map<string, Card>;
+ }
+ 
+ /**
+@@ -34,19 +35,33 @@ interface ValidationContext {
+  */
+ export function runValidate(ctx: ValidationContext, opts: ValidateOptions): void {
+   const violations: string[] = [];
++  const knownTypes = new Set(ctx.cards.map((c) => c.id.type));
++  const index = cardIndex(ctx.cards);
+ 
+   for (const card of ctx.cards) {
+     checkFilesystem(card, violations);
+-    const fmErrors = ctx.frontmatterErrors.get(`${cardKey(card.id)}`);
++    const fmErrors = ctx.frontmatterErrors.get(cardKey(card.id));
+     if (fmErrors)
+       for (const e of fmErrors) violations.push(`${cardKey(card.id)}: ${e}`);
+-    checkRequires(card, ctx, violations);
+-    checkSubagentReferences(card, ctx, violations);
++    checkRequires(card, knownTypes, violations);
++    violations.push(...resolveUses(card, ctx.cards).errors);
++    checkSubagentReferences(card, index, violations);
+     checkValidatorScope(card, violations);
+   }
+ 
+-  checkAliasesGlobal(ctx.cards, violations);
++  violations.push(...findAliasCollisions(ctx.cards));
++  violations.push(...findUsesCycles(ctx.cards));
+   for (const proto of ctx.protocols) checkProtocol(proto, ctx.root, violations);
++  const configResult = loadAgnosticConfig(ctx.root, BUILT_IN_RULE_IDS);
++  violations.push(...configResult.errors);
++  if (configResult.errors.length === 0) {
++    const brainDir = `${ctx.root}/brain`;
++    for (const leak of findHarnessLeaks(brainDir, ctx.root, configResult.config)) {
++      violations.push(
++        `${leak.path}:${leak.line}: harness leak [${leak.ruleId}]: ${leak.token}`
++      );
++    }
++  }
+ 
+   if (opts.verbose) {
+     process.stderr.write(
+@@ -80,9 +95,13 @@ function checkFilesystem(card: Card, violations: string[]): void {
+   }
+ }
+ 
+-function checkRequires(card: Card, ctx: ValidationContext, violations: string[]): void {
++function checkRequires(
++  card: Card,
++  knownTypes: Set<string>,
++  violations: string[]
++): void {
+   for (const req of card.frontmatter.requires ?? []) {
+-    if (!ctx.knownTypes.has(req)) {
++    if (!knownTypes.has(req)) {
+       violations.push(`${cardKey(card.id)}: unknown type in requires: ${req}`);
+     }
+   }
+@@ -90,7 +109,7 @@ function checkRequires(card: Card, ctx: ValidationContext, violations: string[])
+ 
+ function checkSubagentReferences(
+   card: Card,
+-  ctx: ValidationContext,
++  index: Map<string, Card>,
+   violations: string[]
+ ): void {
+   if (!card.frontmatter.subagents?.length) return;
+@@ -101,7 +120,7 @@ function checkSubagentReferences(
+     return;
+   }
+   for (const name of card.frontmatter.subagents) {
+-    if (!ctx.index.has(cardKey({ type: "subagent", name }))) {
++    if (!index.has(cardKey({ type: "subagent", name }))) {
+       violations.push(`${cardKey(card.id)}: unknown subagent in subagents: ${name}`);
+     }
+   }
+@@ -116,31 +135,6 @@ function checkValidatorScope(card: Card, violations: string[]): void {
+   }
+ }
+ 
+-function checkAliasesGlobal(cards: Card[], violations: string[]): void {
+-  const aliases = new Map<string, { type: string; name: string }>();
+-  const canonical = new Set<string>();
+-  for (const c of cards) canonical.add(c.id.name);
+-
+-  for (const c of cards) {
+-    for (const alias of c.frontmatter.aliases ?? []) {
+-      if (canonical.has(alias)) {
+-        const target = cards.find((x) => x.id.name === alias);
+-        violations.push(
+-          `${alias}: collides with canonical name ${target?.id.type ?? "?"}/${alias}`
+-        );
+-      }
+-      const prior = aliases.get(alias);
+-      if (prior) {
+-        violations.push(
+-          `${alias}: collides between ${cardKey(prior)} and ${cardKey(c.id)}`
+-        );
+-      } else {
+-        aliases.set(alias, { type: c.id.type, name: c.id.name });
+-      }
+-    }
+-  }
+-}
+-
+ /** Pick the right ajv variant based on the schema's `$schema` URI. Default
+  * Ajv handles draft-04/06/07; Ajv2020 handles 2019-09 and 2020-12. The two
+  * builds use disjoint keyword sets so we can't share a single instance. */
+@@ -189,26 +183,29 @@ function checkProtocol(proto: Protocol, root: string, violations: string[]): voi
+     return;
+   }
+ 
+-  for (const ex of proto.validExamples) {
+-    const exAbs = `${root}/${ex}`;
+-    let payload: unknown;
+-    try {
+-      payload = JSON.parse(readFileSync(exAbs, "utf8"));
+-    } catch (err) {
+-      violations.push(`${tag}: ${ex} parse error: ${(err as Error).message}`);
+-      continue;
+-    }
+-    if (!validate(payload)) violations.push(`${tag}: ${ex} fails schema`);
+-  }
+-  for (const ex of proto.invalidExamples) {
+-    const exAbs = `${root}/${ex}`;
++  checkExamples(proto.validExamples, true, validate, root, tag, violations);
++  checkExamples(proto.invalidExamples, false, validate, root, tag, violations);
++}
++
++function checkExamples(
++  examples: string[],
++  expectPass: boolean,
++  validate: ValidateFunction,
++  root: string,
++  tag: string,
++  violations: string[]
++): void {
++  for (const ex of examples) {
+     let payload: unknown;
+     try {
+-      payload = JSON.parse(readFileSync(exAbs, "utf8"));
++      payload = JSON.parse(readFileSync(`${root}/${ex}`, "utf8"));
+     } catch (err) {
+       violations.push(`${tag}: ${ex} parse error: ${(err as Error).message}`);
+       continue;
+     }
+-    if (validate(payload)) violations.push(`${tag}: ${ex} passes schema (should fail)`);
++    const passed = validate(payload);
++    if (expectPass && !passed) violations.push(`${tag}: ${ex} fails schema`);
++    if (!expectPass && passed)
++      violations.push(`${tag}: ${ex} passes schema (should fail)`);
+   }
+ }
+diff --git a/src/lib/agnostic-config.ts b/src/lib/agnostic-config.ts
+new file mode 100644
+index 0000000..7e83d63
+--- /dev/null
++++ b/src/lib/agnostic-config.ts
+@@ -0,0 +1,173 @@
++import { existsSync, readFileSync } from "node:fs";
++import { join } from "node:path";
++
++export interface AdditionalTerm {
++  id: string;
++  term: string;
++  caseSensitive: boolean;
++}
++
++export interface GuardAllowance {
++  pathPrefix: string;
++  rules: string[];
++}
++
++export interface AgnosticGuardConfig {
++  additionalTerms: AdditionalTerm[];
++  allow: GuardAllowance[];
++}
++
++export interface ConfigLoadResult {
++  config: AgnosticGuardConfig;
++  errors: string[];
++}
++
++const CONFIG_PATH = [".tagen", "agnostic-guard.json"] as const;
++const TOP_LEVEL_KEYS = new Set(["version", "additionalTerms", "allow"]);
++const TERM_KEYS = new Set(["id", "term", "caseSensitive"]);
++const ALLOW_KEYS = new Set(["pathPrefix", "rules"]);
++
++export function loadAgnosticConfig(
++  root: string,
++  builtInRuleIds: ReadonlySet<string>
++): ConfigLoadResult {
++  const path = join(root, ...CONFIG_PATH);
++  const empty: AgnosticGuardConfig = { additionalTerms: [], allow: [] };
++  if (!existsSync(path)) return { config: empty, errors: [] };
++
++  let raw: unknown;
++  try {
++    raw = JSON.parse(readFileSync(path, "utf8"));
++  } catch (error) {
++    return {
++      config: empty,
++      errors: [`${CONFIG_PATH.join("/")}: invalid JSON: ${messageOf(error)}`],
++    };
++  }
++  if (!isRecord(raw)) {
++    return {
++      config: empty,
++      errors: [`${CONFIG_PATH.join("/")}: config must be a JSON object`],
++    };
++  }
++
++  const errors: string[] = [];
++  rejectUnknownKeys(raw, TOP_LEVEL_KEYS, "config", errors);
++  if (raw.version !== 1) errors.push("config: version must be 1");
++
++  const additionalTerms = parseTerms(raw.additionalTerms, builtInRuleIds, errors);
++  const knownRuleIds = new Set([
++    ...builtInRuleIds,
++    ...additionalTerms.map((term) => term.id),
++  ]);
++  const allow = parseAllowances(raw.allow, knownRuleIds, errors);
++
++  return { config: { additionalTerms, allow }, errors };
++}
++
++function parseTerms(
++  value: unknown,
++  reservedIds: ReadonlySet<string>,
++  errors: string[]
++): AdditionalTerm[] {
++  if (value === undefined) return [];
++  if (!Array.isArray(value)) {
++    errors.push("config: additionalTerms must be an array");
++    return [];
++  }
++  const out: AdditionalTerm[] = [];
++  const ids = new Set<string>();
++  for (const [index, item] of value.entries()) {
++    const tag = `config: additionalTerms[${index}]`;
++    if (!isRecord(item)) {
++      errors.push(`${tag} must be an object`);
++      continue;
++    }
++    rejectUnknownKeys(item, TERM_KEYS, tag, errors);
++    if (typeof item.id !== "string" || item.id.length === 0) {
++      errors.push(`${tag}.id must be a non-empty string`);
++      continue;
++    }
++    if (ids.has(item.id)) errors.push(`${tag}.id duplicates '${item.id}'`);
++    if (reservedIds.has(item.id)) {
++      errors.push(`${tag}.id conflicts with built-in rule '${item.id}'`);
++    }
++    ids.add(item.id);
++    if (typeof item.term !== "string" || item.term.length === 0) {
++      errors.push(`${tag}.term must be a non-empty string`);
++      continue;
++    }
++    if (typeof item.caseSensitive !== "boolean") {
++      errors.push(`${tag}.caseSensitive must be a boolean`);
++      continue;
++    }
++    out.push({
++      id: item.id,
++      term: item.term,
++      caseSensitive: item.caseSensitive,
++    });
++  }
++  return out;
++}
++
++function parseAllowances(
++  value: unknown,
++  knownRuleIds: ReadonlySet<string>,
++  errors: string[]
++): GuardAllowance[] {
++  if (value === undefined) return [];
++  if (!Array.isArray(value)) {
++    errors.push("config: allow must be an array");
++    return [];
++  }
++  const out: GuardAllowance[] = [];
++  for (const [index, item] of value.entries()) {
++    const tag = `config: allow[${index}]`;
++    if (!isRecord(item)) {
++      errors.push(`${tag} must be an object`);
++      continue;
++    }
++    rejectUnknownKeys(item, ALLOW_KEYS, tag, errors);
++    const pathPrefix = item.pathPrefix;
++    if (
++      typeof pathPrefix !== "string" ||
++      !pathPrefix.startsWith("brain/") ||
++      pathPrefix.includes("..")
++    ) {
++      errors.push(`${tag}.pathPrefix must stay under brain/`);
++      continue;
++    }
++    if (!isStringArray(item.rules) || item.rules.length === 0) {
++      errors.push(`${tag}.rules must be a non-empty string array`);
++      continue;
++    }
++    for (const rule of item.rules) {
++      if (!knownRuleIds.has(rule)) errors.push(`${tag}: unknown rule id '${rule}'`);
++    }
++    out.push({ pathPrefix, rules: item.rules });
++  }
++  return out;
++}
++
++function rejectUnknownKeys(
++  value: Record<string, unknown>,
++  allowed: ReadonlySet<string>,
++  tag: string,
++  errors: string[]
++): void {
++  for (const key of Object.keys(value)) {
++    if (!allowed.has(key)) errors.push(`${tag}: unknown key '${key}'`);
++  }
++}
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return value !== null && typeof value === "object" && !Array.isArray(value);
++}
++
++function isStringArray(value: unknown): value is string[] {
++  return Array.isArray(value) && value.every((item) => typeof item === "string");
++}
++
++function messageOf(error: unknown): string {
++  return error instanceof Error ? error.message : String(error);
++}
+diff --git a/src/lib/aliases.ts b/src/lib/aliases.ts
+new file mode 100644
+index 0000000..05ac337
+--- /dev/null
++++ b/src/lib/aliases.ts
+@@ -0,0 +1,36 @@
++import { type Card, type CardId, cardKey } from "./types.ts";
++
++/**
++ * Detect global alias collisions across the catalog. Two failure modes:
++ *   1. an alias collides with another card's canonical name
++ *   2. the same alias appears on two different cards
++ *
++ * Pure detection — caller decides whether to surface as `tagen validate`
++ * violations, `tagen get` errors, or both.
++ */
++export function findAliasCollisions(cards: Card[]): string[] {
++  const errors: string[] = [];
++  const canonical = new Map<string, CardId>();
++  for (const c of cards) canonical.set(c.id.name, c.id);
++
++  const seen = new Map<string, CardId>();
++  for (const c of cards) {
++    for (const alias of c.frontmatter.aliases ?? []) {
++      const collidingCanonical = canonical.get(alias);
++      if (collidingCanonical) {
++        errors.push(
++          `alias '${alias}' on ${cardKey(c.id)} collides with canonical name ${cardKey(collidingCanonical)}`
++        );
++      }
++      const prior = seen.get(alias);
++      if (prior) {
++        errors.push(
++          `alias '${alias}' collides between ${cardKey(prior)} and ${cardKey(c.id)}`
++        );
++      } else {
++        seen.set(alias, c.id);
++      }
++    }
++  }
++  return errors;
++}
+diff --git a/src/lib/card-references.ts b/src/lib/card-references.ts
+new file mode 100644
+index 0000000..307c12b
+--- /dev/null
++++ b/src/lib/card-references.ts
+@@ -0,0 +1,101 @@
++import { type Card, cardIndex, cardKey, KEBAB_NAME } from "./types.ts";
++
++export interface UsesResolution {
++  cards: Card[];
++  errors: string[];
++}
++
++/** Resolve canonical `<type>/<name>` IDs declared by one card. */
++export function resolveUses(owner: Card, cards: Card[]): UsesResolution {
++  const index = cardIndex(cards);
++  const resolved: Card[] = [];
++  const errors: string[] = [];
++  const seen = new Set<string>();
++
++  for (const target of owner.frontmatter.uses ?? []) {
++    if (!isCardKey(target)) {
++      errors.push(
++        `${cardKey(owner.id)}: invalid uses target '${target}', expected <type>/<name>`
++      );
++      continue;
++    }
++    if (target === cardKey(owner.id)) {
++      errors.push(`${cardKey(owner.id)}: uses cannot reference itself`);
++      continue;
++    }
++    const card = index.get(target);
++    if (!card) {
++      errors.push(`${cardKey(owner.id)}: unknown card in uses: ${target}`);
++      continue;
++    }
++    if (!seen.has(target)) {
++      seen.add(target);
++      resolved.push(card);
++    }
++  }
++
++  return { cards: resolved, errors };
++}
++
++/** Expand only direct uses from the original seed set. */
++export function expandDirectUses(seeds: Card[], cards: Card[]): UsesResolution {
++  const expanded = new Map(seeds.map((card) => [cardKey(card.id), card] as const));
++  const errors: string[] = [];
++
++  for (const seed of seeds) {
++    const result = resolveUses(seed, cards);
++    errors.push(...result.errors);
++    for (const card of result.cards) expanded.set(cardKey(card.id), card);
++  }
++
++  return { cards: [...expanded.values()], errors };
++}
++
++/** Detect cycles in the concrete uses graph and render each cycle once. */
++export function findUsesCycles(cards: Card[]): string[] {
++  const edges = new Map<string, string[]>();
++  for (const card of cards) {
++    const owner = cardKey(card.id);
++    edges.set(
++      owner,
++      (card.frontmatter.uses ?? []).filter((target) => isCardKey(target))
++    );
++  }
++
++  const visiting = new Set<string>();
++  const visited = new Set<string>();
++  const stack: string[] = [];
++  const cycles = new Set<string>();
++
++  const visit = (node: string): void => {
++    if (visited.has(node)) return;
++    if (visiting.has(node)) {
++      const start = stack.indexOf(node);
++      const cycle = [...stack.slice(start), node].join(" -> ");
++      cycles.add(cycle);
++      return;
++    }
++    visiting.add(node);
++    stack.push(node);
++    for (const next of edges.get(node) ?? []) {
++      if (edges.has(next)) visit(next);
++    }
++    stack.pop();
++    visiting.delete(node);
++    visited.add(node);
++  };
++
++  for (const node of [...edges.keys()].sort()) visit(node);
++  return [...cycles].sort().map((cycle) => `uses cycle: ${cycle}`);
++}
++
++function isCardKey(value: string): boolean {
++  const parts = value.split("/");
++  return (
++    parts.length === 2 &&
++    parts[0] !== undefined &&
++    parts[1] !== undefined &&
++    KEBAB_NAME.test(parts[0]) &&
++    KEBAB_NAME.test(parts[1])
++  );
++}
+diff --git a/src/lib/compose.ts b/src/lib/compose.ts
+index 4d1d119..69ce501 100644
+--- a/src/lib/compose.ts
++++ b/src/lib/compose.ts
+@@ -1,9 +1,12 @@
++import { findAliasCollisions } from "./aliases.ts";
++import { expandDirectUses } from "./card-references.ts";
+ import { rel } from "./catalog.ts";
+ import { type FuzzyEntry, fuzzyMatch, MIN_QUERY_LENGTH } from "./fuzzy.ts";
+ import {
+   type Card,
+   type CardId,
+   type CardType,
++  cardIndex,
+   cardKey,
+   type FilledSlot,
+   type Manifest,
+@@ -47,14 +50,11 @@ export function compose(
+   query: ComposeQuery,
+   knownTypes: Set<CardType>
+ ): ComposeOutcome {
+-  const errors: string[] = [];
++  const errors: string[] = [...findAliasCollisions(cards)];
+   const warnings: string[] = [];
+   const browseTypes: CardType[] = [];
+ 
+-  const index = new Map<string, Card>();
+-  for (const c of cards) index.set(cardKey(c.id), c);
+-
+-  buildAliasIndex(cards, errors);
++  const index = cardIndex(cards);
+ 
+   const matched = new Map<string, Card>();
+ 
+@@ -108,7 +108,11 @@ export function compose(
+     return { errors: [], browseTypes, emptyMatch: false };
+   }
+ 
+-  const matchedSorted = [...matched.values()].sort(byTypeName);
++  const expanded = expandDirectUses([...matched.values()], cards);
++  if (expanded.errors.length > 0) {
++    return { errors: expanded.errors, browseTypes, emptyMatch: false };
++  }
++  const matchedSorted = expanded.cards.sort(byTypeName);
+ 
+   const requiredTypes = collectRequires(matchedSorted);
+   const slots: ResolvedSlot[] = [];
+@@ -183,32 +187,6 @@ export function compose(
+   return { manifest, errors: [], browseTypes, emptyMatch: false };
+ }
+ 
+-function buildAliasIndex(cards: Card[], errors: string[]): Map<string, CardId> {
+-  const aliases = new Map<string, CardId>();
+-  const cardsByName = new Map<string, CardId>();
+-  for (const c of cards) cardsByName.set(c.id.name, c.id);
+-
+-  for (const c of cards) {
+-    for (const alias of c.frontmatter.aliases ?? []) {
+-      const collidingCanonical = cardsByName.get(alias);
+-      if (collidingCanonical) {
+-        errors.push(
+-          `alias '${alias}' on ${cardKey(c.id)} collides with canonical name ${cardKey(collidingCanonical)}`
+-        );
+-      }
+-      const existing = aliases.get(alias);
+-      if (existing) {
+-        errors.push(
+-          `alias '${alias}' collides between ${cardKey(existing)} and ${cardKey(c.id)}`
+-        );
+-        continue;
+-      }
+-      aliases.set(alias, c.id);
+-    }
+-  }
+-  return aliases;
+-}
+-
+ function buildFuzzyEntries(cards: Card[]): FuzzyEntry[] {
+   return cards.map((c) => ({
+     id: c.id,
+diff --git a/src/lib/frontmatter.ts b/src/lib/frontmatter.ts
+index cc2001b..2b8bcb2 100644
+--- a/src/lib/frontmatter.ts
++++ b/src/lib/frontmatter.ts
+@@ -11,7 +11,7 @@ const COMMON_FIELDS = ["description", "aliases", "requires"] as const;
+ const ALLOWED_FIELDS: Record<CardType, readonly string[]> = {
+   review: [...COMMON_FIELDS, "subagents"],
+   methodology: [...COMMON_FIELDS, "subagents"],
+-  subagent: [...COMMON_FIELDS, "model"],
++  subagent: [...COMMON_FIELDS, "uses"],
+   lang: COMMON_FIELDS,
+   framework: COMMON_FIELDS,
+   test: COMMON_FIELDS,
+@@ -19,8 +19,6 @@ const ALLOWED_FIELDS: Record<CardType, readonly string[]> = {
+   protocol: COMMON_FIELDS,
+ };
+ 
+-const VALID_MODELS = new Set(["haiku", "sonnet", "opus"]);
+-
+ export interface ParseResult {
+   frontmatter: CardFrontmatter;
+   body: string;
+@@ -99,6 +97,17 @@ export function parseCore(source: string, type: CardType): ParseResult {
+     }
+   }
+ 
++  if (allowed.has("uses")) {
++    const uses = fm.uses;
++    if (uses !== undefined) {
++      if (!isStringArray(uses)) {
++        errors.push("uses must be an array of strings");
++      } else {
++        out.uses = uses;
++      }
++    }
++  }
++
+   if (allowed.has("subagents")) {
+     const subagents = fm.subagents;
+     if (subagents !== undefined) {
+@@ -110,17 +119,6 @@ export function parseCore(source: string, type: CardType): ParseResult {
+     }
+   }
+ 
+-  if (allowed.has("model")) {
+-    const model = fm.model;
+-    if (model === undefined) {
+-      errors.push("missing required field: model");
+-    } else if (typeof model !== "string" || !VALID_MODELS.has(model)) {
+-      errors.push(`unknown model: ${String(model)} (valid: haiku, sonnet, opus)`);
+-    } else {
+-      out.model = model as "haiku" | "sonnet" | "opus";
+-    }
+-  }
+-
+   return { frontmatter: out, body, errors };
+ }
+ 
+diff --git a/src/lib/harness-guard.ts b/src/lib/harness-guard.ts
+new file mode 100644
+index 0000000..535b0c9
+--- /dev/null
++++ b/src/lib/harness-guard.ts
+@@ -0,0 +1,123 @@
++import { readdirSync, readFileSync, statSync } from "node:fs";
++import { join, relative } from "node:path";
++import type { AgnosticGuardConfig } from "./agnostic-config.ts";
++
++interface GuardRule {
++  id: string;
++  pattern: RegExp;
++}
++
++export interface HarnessLeak {
++  path: string;
++  line: number;
++  ruleId: string;
++  token: string;
++}
++
++const SCANNED_EXTENSIONS = new Set([".md", ".json", ".ts", ".yaml", ".yml", ".toml"]);
++
++const BUILT_IN_RULES: readonly GuardRule[] = [
++  {
++    id: "vendor-model-tier",
++    pattern: /\b(?:haiku|sonnet|opus)\b/giu,
++  },
++  {
++    id: "vendor-model-id",
++    pattern: /\b(?:claude|gpt|gemini)[-_](?=[a-z0-9._-]*\d)[a-z0-9][a-z0-9._-]*\b/giu,
++  },
++  {
++    id: "harness-name",
++    pattern: /\b(?:Claude Code|OpenAI Codex|Codex CLI|Gemini CLI)\b/gu,
++  },
++  {
++    id: "claude-hook-event",
++    pattern: /\b(?:PreToolUse|PostToolUse|SubagentStop|SessionStart|SessionEnd)\b/gu,
++  },
++  {
++    id: "claude-path",
++    pattern: /(?:\.claude-plugin\/|\.claude\/|CLAUDE_PLUGIN_ROOT)/gu,
++  },
++  {
++    id: "claude-command",
++    pattern: /(?:^|[\s`])\/(?:plugin|mcp)\b/gu,
++  },
++  {
++    id: "claude-tool-language",
++    pattern: /\b(?:Task|Agent|AskUserQuestion)\s+tool\b/gu,
++  },
++];
++
++export const BUILT_IN_RULE_IDS: ReadonlySet<string> = new Set(
++  BUILT_IN_RULES.map((rule) => rule.id)
++);
++
++export function findHarnessLeaks(
++  brainDir: string,
++  root: string,
++  config: AgnosticGuardConfig
++): HarnessLeak[] {
++  const rules = [
++    ...BUILT_IN_RULES,
++    ...config.additionalTerms.map((term) => ({
++      id: term.id,
++      pattern: new RegExp(escapeRegExp(term.term), term.caseSensitive ? "gu" : "giu"),
++    })),
++  ];
++  const leaks: HarnessLeak[] = [];
++
++  for (const file of listTextFiles(brainDir)) {
++    const rel = relative(root, file);
++    const lines = readFileSync(file, "utf8").split(/\r?\n/);
++    for (const [index, line] of lines.entries()) {
++      for (const rule of rules) {
++        if (isAllowed(rel, rule.id, config)) continue;
++        rule.pattern.lastIndex = 0;
++        for (const match of line.matchAll(rule.pattern)) {
++          leaks.push({
++            path: rel,
++            line: index + 1,
++            ruleId: rule.id,
++            token: match[0].trim(),
++          });
++        }
++      }
++    }
++  }
++  return leaks.sort(
++    (a, b) =>
++      a.path.localeCompare(b.path) ||
++      a.line - b.line ||
++      a.ruleId.localeCompare(b.ruleId)
++  );
++}
++
++function listTextFiles(dir: string): string[] {
++  const out: string[] = [];
++  for (const entry of readdirSync(dir, { withFileTypes: true })) {
++    const path = join(dir, entry.name);
++    if (entry.isDirectory()) {
++      out.push(...listTextFiles(path));
++      continue;
++    }
++    if (!entry.isFile() || !hasScannedExtension(entry.name)) continue;
++    if (statSync(path).size > 1_000_000) continue;
++    out.push(path);
++  }
++  return out.sort();
++}
++
++function hasScannedExtension(name: string): boolean {
++  const dot = name.lastIndexOf(".");
++  return dot >= 0 && SCANNED_EXTENSIONS.has(name.slice(dot));
++}
++
++function isAllowed(path: string, ruleId: string, config: AgnosticGuardConfig): boolean {
++  return config.allow.some(
++    (allowance) =>
++      path.startsWith(allowance.pathPrefix) && allowance.rules.includes(ruleId)
++  );
++}
++
++function escapeRegExp(value: string): string {
++  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
++}
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index e1fcc1b..5272b16 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -30,10 +30,10 @@ export interface CardFrontmatter {
+   description: string;
+   aliases?: string[];
+   requires?: CardType[];
++  /** subagent only; canonical `<type>/<name>` card IDs */
++  uses?: string[];
+   /** review/methodology only */
+   subagents?: string[];
+-  /** subagent only */
+-  model?: "haiku" | "sonnet" | "opus";
+ }
+ 
+ export interface Card {
+@@ -75,6 +75,11 @@ export interface FilledSlot {
+   references: string[];
+ }
+ 
++/** Index a card list by `<type>/<name>` for O(1) lookup. */
++export function cardIndex(cards: Card[]): Map<string, Card> {
++  return new Map(cards.map((c) => [cardKey(c.id), c] as const));
++}
++
+ export interface Manifest {
+   /** Absolute path of the marketplace dir. All other paths are relative to this. */
+   root: string;
+diff --git a/src/main.ts b/src/main.ts
+index 09e3587..568edb0 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -6,7 +6,7 @@ import { runList } from "./commands/list.ts";
+ import { runValidate } from "./commands/validate.ts";
+ import { findBrainDir, loadAllCards, marketplaceRoot } from "./lib/catalog.ts";
+ import { type ComposeQuery, emptyQuery, knownTypesFromCards } from "./lib/compose.ts";
+-import { type CardId, type CardType, cardKey } from "./lib/types.ts";
++import type { CardId, CardType } from "./lib/types.ts";
+ 
+ const USAGE = `tagen — read-only CLI for a brain/ directory of typed cards
+ 
+@@ -147,12 +147,7 @@ async function main(): Promise<void> {
+       return;
+     }
+     case "validate": {
+-      const knownTypes = knownTypesFromCards(cards);
+-      const index = new Map(cards.map((c) => [cardKey(c.id), c] as const));
+-      runValidate(
+-        { cards, protocols, root, frontmatterErrors, knownTypes, index },
+-        { verbose }
+-      );
++      runValidate({ cards, protocols, root, frontmatterErrors }, { verbose });
+       return;
+     }
+     case "get": {
