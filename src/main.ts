@@ -6,7 +6,7 @@ import { runList } from "./commands/list.ts";
 import { runValidate } from "./commands/validate.ts";
 import { findBrainDir, loadAllCards, marketplaceRoot } from "./lib/catalog.ts";
 import { type ComposeQuery, emptyQuery, knownTypesFromCards } from "./lib/compose.ts";
-import { type CardId, type CardType, cardKey } from "./lib/types.ts";
+import type { CardId, CardType } from "./lib/types.ts";
 
 const USAGE = `tagen — read-only CLI for a brain/ directory of typed cards
 
@@ -147,12 +147,7 @@ async function main(): Promise<void> {
       return;
     }
     case "validate": {
-      const knownTypes = knownTypesFromCards(cards);
-      const index = new Map(cards.map((c) => [cardKey(c.id), c] as const));
-      runValidate(
-        { cards, protocols, root, frontmatterErrors, knownTypes, index },
-        { verbose }
-      );
+      runValidate({ cards, protocols, root, frontmatterErrors }, { verbose });
       return;
     }
     case "get": {

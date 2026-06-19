@@ -1,6 +1,5 @@
 ---
 description: "Domain-scoped style review of a diff partition."
-model: haiku
 ---
 
 # Style Reviewer

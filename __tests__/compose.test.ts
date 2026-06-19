@@ -130,4 +130,65 @@ describe("compose", () => {
       expect(path.startsWith("brain/")).toBe(true);
     }
   });
+
+  test("subagent uses expands direct cards before slot filling", () => {
+    const r = compose(
+      cards,
+      ROOT,
+      q(["implementer", "csharp", "bun-test"]),
+      knownTypes
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.manifest?.modules.map((m) => `${m.type}/${m.name}`)).toEqual([
+      "lang/csharp",
+      "methodology/tdd",
+      "subagent/implementer",
+      "test/bun-test",
+    ]);
+    expect(r.manifest?.core).toContain("brain/methodology/tdd/CORE.md");
+    expect(r.manifest?.references).toContain(
+      "brain/methodology/tdd/references/cycle.md"
+    );
+    expect(r.manifest?.filled.lang?.core).toBe("brain/lang/csharp/CORE.md");
+    expect(r.manifest?.filled.test?.core).toBe("brain/test/bun-test/CORE.md");
+  });
+
+  test("uses is one level and does not follow uses on an added card", () => {
+    const implementer = cards.find((c) => c.id.name === "implementer");
+    const tdd = cards.find((c) => c.id.type === "methodology" && c.id.name === "tdd");
+    if (!implementer || !tdd) throw new Error("fixture cards missing");
+    const modified = cards.map((card) =>
+      card === tdd
+        ? {
+            ...card,
+            frontmatter: {
+              ...card.frontmatter,
+              uses: ["architecture/cli"],
+            },
+          }
+        : card
+    );
+    const r = compose(
+      modified,
+      ROOT,
+      q(["implementer", "csharp", "bun-test"]),
+      knownTypes
+    );
+    expect(r.manifest?.modules.some((m) => m.name === "cli")).toBe(false);
+  });
+
+  test("malformed or missing uses target blocks composition", () => {
+    const implementer = cards.find((c) => c.id.name === "implementer");
+    if (!implementer) throw new Error("fixture card missing");
+    for (const target of ["tdd", "methodology/missing"]) {
+      const modified = cards.map((card) =>
+        card === implementer
+          ? { ...card, frontmatter: { ...card.frontmatter, uses: [target] } }
+          : card
+      );
+      const r = compose(modified, ROOT, q(["implementer"]), knownTypes);
+      expect(r.errors.length).toBeGreaterThan(0);
+      expect(r.manifest).toBeUndefined();
+    }
+  });
 });

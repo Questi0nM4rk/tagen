@@ -1,9 +1,14 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import Ajv, { type ValidateFunction } from "ajv";
 import Ajv2020 from "ajv/dist/2020.js";
+import { loadAgnosticConfig } from "../lib/agnostic-config.ts";
+import { findAliasCollisions } from "../lib/aliases.ts";
+import { findUsesCycles, resolveUses } from "../lib/card-references.ts";
 import { bodyLineCount } from "../lib/frontmatter.ts";
+import { BUILT_IN_RULE_IDS, findHarnessLeaks } from "../lib/harness-guard.ts";
 import {
   type Card,
+  cardIndex,
   cardKey,
   KEBAB_NAME,
   type Protocol,
@@ -14,17 +19,13 @@ export interface ValidateOptions {
   verbose: boolean;
 }
 
-interface ValidationContext {
+export interface ValidationContext {
   cards: Card[];
   protocols: Protocol[];
   /** Absolute marketplace root (parent of brain/). Used to read disk paths. */
   root: string;
   /** Frontmatter parse errors keyed by `<type>/<name>`. */
   frontmatterErrors: Map<string, string[]>;
-  /** Set of every type dir name under brain/. */
-  knownTypes: Set<string>;
-  /** Index keyed by `<type>/<name>`. */
-  index: Map<string, Card>;
 }
 
 /**
@@ -34,19 +35,33 @@ interface ValidationContext {
  */
 export function runValidate(ctx: ValidationContext, opts: ValidateOptions): void {
   const violations: string[] = [];
+  const knownTypes = new Set(ctx.cards.map((c) => c.id.type));
+  const index = cardIndex(ctx.cards);
 
   for (const card of ctx.cards) {
     checkFilesystem(card, violations);
-    const fmErrors = ctx.frontmatterErrors.get(`${cardKey(card.id)}`);
+    const fmErrors = ctx.frontmatterErrors.get(cardKey(card.id));
     if (fmErrors)
       for (const e of fmErrors) violations.push(`${cardKey(card.id)}: ${e}`);
-    checkRequires(card, ctx, violations);
-    checkSubagentReferences(card, ctx, violations);
+    checkRequires(card, knownTypes, violations);
+    violations.push(...resolveUses(card, ctx.cards).errors);
+    checkSubagentReferences(card, index, violations);
     checkValidatorScope(card, violations);
   }
 
-  checkAliasesGlobal(ctx.cards, violations);
+  violations.push(...findAliasCollisions(ctx.cards));
+  violations.push(...findUsesCycles(ctx.cards));
   for (const proto of ctx.protocols) checkProtocol(proto, ctx.root, violations);
+  const configResult = loadAgnosticConfig(ctx.root, BUILT_IN_RULE_IDS);
+  violations.push(...configResult.errors);
+  if (configResult.errors.length === 0) {
+    const brainDir = `${ctx.root}/brain`;
+    for (const leak of findHarnessLeaks(brainDir, ctx.root, configResult.config)) {
+      violations.push(
+        `${leak.path}:${leak.line}: harness leak [${leak.ruleId}]: ${leak.token}`
+      );
+    }
+  }
 
   if (opts.verbose) {
     process.stderr.write(
@@ -80,9 +95,13 @@ function checkFilesystem(card: Card, violations: string[]): void {
   }
 }
 
-function checkRequires(card: Card, ctx: ValidationContext, violations: string[]): void {
+function checkRequires(
+  card: Card,
+  knownTypes: Set<string>,
+  violations: string[]
+): void {
   for (const req of card.frontmatter.requires ?? []) {
-    if (!ctx.knownTypes.has(req)) {
+    if (!knownTypes.has(req)) {
       violations.push(`${cardKey(card.id)}: unknown type in requires: ${req}`);
     }
   }
@@ -90,7 +109,7 @@ function checkRequires(card: Card, ctx: ValidationContext, violations: string[])
 
 function checkSubagentReferences(
   card: Card,
-  ctx: ValidationContext,
+  index: Map<string, Card>,
   violations: string[]
 ): void {
   if (!card.frontmatter.subagents?.length) return;
@@ -101,7 +120,7 @@ function checkSubagentReferences(
     return;
   }
   for (const name of card.frontmatter.subagents) {
-    if (!ctx.index.has(cardKey({ type: "subagent", name }))) {
+    if (!index.has(cardKey({ type: "subagent", name }))) {
       violations.push(`${cardKey(card.id)}: unknown subagent in subagents: ${name}`);
     }
   }
@@ -113,31 +132,6 @@ function checkValidatorScope(card: Card, violations: string[]): void {
     violations.push(
       `${cardKey(card.id)}: validators/ allowed only on review and methodology cards`
     );
-  }
-}
-
-function checkAliasesGlobal(cards: Card[], violations: string[]): void {
-  const aliases = new Map<string, { type: string; name: string }>();
-  const canonical = new Set<string>();
-  for (const c of cards) canonical.add(c.id.name);
-
-  for (const c of cards) {
-    for (const alias of c.frontmatter.aliases ?? []) {
-      if (canonical.has(alias)) {
-        const target = cards.find((x) => x.id.name === alias);
-        violations.push(
-          `${alias}: collides with canonical name ${target?.id.type ?? "?"}/${alias}`
-        );
-      }
-      const prior = aliases.get(alias);
-      if (prior) {
-        violations.push(
-          `${alias}: collides between ${cardKey(prior)} and ${cardKey(c.id)}`
-        );
-      } else {
-        aliases.set(alias, { type: c.id.type, name: c.id.name });
-      }
-    }
   }
 }
 
@@ -189,26 +183,29 @@ function checkProtocol(proto: Protocol, root: string, violations: string[]): voi
     return;
   }
 
-  for (const ex of proto.validExamples) {
-    const exAbs = `${root}/${ex}`;
+  checkExamples(proto.validExamples, true, validate, root, tag, violations);
+  checkExamples(proto.invalidExamples, false, validate, root, tag, violations);
+}
+
+function checkExamples(
+  examples: string[],
+  expectPass: boolean,
+  validate: ValidateFunction,
+  root: string,
+  tag: string,
+  violations: string[]
+): void {
+  for (const ex of examples) {
     let payload: unknown;
     try {
-      payload = JSON.parse(readFileSync(exAbs, "utf8"));
+      payload = JSON.parse(readFileSync(`${root}/${ex}`, "utf8"));
     } catch (err) {
       violations.push(`${tag}: ${ex} parse error: ${(err as Error).message}`);
       continue;
     }
-    if (!validate(payload)) violations.push(`${tag}: ${ex} fails schema`);
-  }
-  for (const ex of proto.invalidExamples) {
-    const exAbs = `${root}/${ex}`;
-    let payload: unknown;
-    try {
-      payload = JSON.parse(readFileSync(exAbs, "utf8"));
-    } catch (err) {
-      violations.push(`${tag}: ${ex} parse error: ${(err as Error).message}`);
-      continue;
-    }
-    if (validate(payload)) violations.push(`${tag}: ${ex} passes schema (should fail)`);
+    const passed = validate(payload);
+    if (expectPass && !passed) violations.push(`${tag}: ${ex} fails schema`);
+    if (!expectPass && passed)
+      violations.push(`${tag}: ${ex} passes schema (should fail)`);
   }
 }
