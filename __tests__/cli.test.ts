@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
 const ENTRY = join(ROOT, "src", "main.ts");
+const FIXTURES = join(ROOT, "__tests__", "fixtures");
 const PKG_VERSION = (
   JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
     version: string;
@@ -187,3 +188,73 @@ describe("tagen <unknown>", () => {
     }
   });
 });
+
+describe("tagen --root <dir>", () => {
+  test("get resolves from an unrelated cwd and emits the override root", async () => {
+    const result = await runFromUnrelatedCwd([
+      "get",
+      "strict",
+      "csharp",
+      "--json",
+      "--root",
+      FIXTURES,
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const manifest = JSON.parse(result.stdout) as {
+      root: string;
+      modules: Array<{ type: string; name: string }>;
+    };
+    expect(manifest.root).toBe(FIXTURES);
+    expect(
+      manifest.modules.find(
+        (module) => module.type === "lang" && module.name === "csharp"
+      )
+    ).toBeDefined();
+  });
+
+  test("list resolves from an unrelated cwd", async () => {
+    const result = await runFromUnrelatedCwd(["list", "--root", FIXTURES]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("lang/csharp");
+  });
+
+  test("validate resolves from an unrelated cwd", async () => {
+    const result = await runFromUnrelatedCwd(["validate", "--root", FIXTURES]);
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("fails clearly when <dir>/brain is absent", async () => {
+    const empty = mkdtempSync(join(tmpdir(), "tagen-cli-no-brain-"));
+    try {
+      const result = await runFromUnrelatedCwd(["list", "--root", empty]);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("no brain/ directory at");
+      expect(result.stderr).toContain(empty);
+      expect(result.stderr).toContain("--root");
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  test("requires a value", async () => {
+    const result = await runFromUnrelatedCwd(["list", "--root"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("--root requires a value");
+  });
+
+  test("is rejected by add, which still uses cwd discovery", async () => {
+    const result = await runCli(["add", "--root", FIXTURES]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("--root is not valid for 'add'");
+  });
+});
+
+async function runFromUnrelatedCwd(args: string[]): ReturnType<typeof runCli> {
+  const cwd = mkdtempSync(join(tmpdir(), "tagen-unrelated-cwd-"));
+  try {
+    return await runCli(args, cwd);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}

@@ -5,6 +5,7 @@ import {
   repeatableValueFlag,
 } from "../cli/command.ts";
 import { fail } from "../cli/errors.ts";
+import { ROOT_FLAG } from "../cli/root.ts";
 import { type ComposeQuery, compose, knownTypesFromCards } from "../lib/compose.ts";
 import type { Card, CardId } from "../lib/types.ts";
 import { runList } from "./list.ts";
@@ -124,13 +125,13 @@ export function buildComposeQuery(args: ParsedCommandArgs): ComposeQuery {
 export const getCommand = defineCommand({
   name: "get",
   summary: "Resolve a composition into a JSON manifest (--json)",
-  flags: [TYPE_FLAG, NAME_FLAG, PIN_FLAG, JSON_FLAG],
+  flags: [TYPE_FLAG, NAME_FLAG, PIN_FLAG, JSON_FLAG, ROOT_FLAG],
   positional: "allow",
   positionalHelp: [
     "<args>...        Positional, fuzzy-matched against canonical names + aliases",
     "                 (min 3 chars). A bare type-name triggers browse intent.",
   ],
-  catalog: "clean",
+  catalog: { policy: "clean", rootFlag: ROOT_FLAG },
   decode(args): GetCommandOptions {
     return {
       query: buildComposeQuery(args),
