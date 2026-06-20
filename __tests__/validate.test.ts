@@ -21,7 +21,6 @@ function makeContext(brainDir: string) {
   return { cards, protocols, root, frontmatterErrors, catalogErrors };
 }
 
-const ORIG_EXIT = process.exit;
 const ORIG_STDERR = process.stderr.write.bind(process.stderr);
 
 interface ValidateRun {
@@ -32,20 +31,13 @@ interface ValidateRun {
 function runAndCapture(brainDir: string, verbose = false): ValidateRun {
   let exitCode = 0;
   const chunks: string[] = [];
-  process.exit = ((code?: number) => {
-    exitCode = code ?? 0;
-    throw new Error("__exit__");
-  }) as never;
   process.stderr.write = ((c: string | Uint8Array) => {
     chunks.push(typeof c === "string" ? c : Buffer.from(c).toString("utf8"));
     return true;
   }) as typeof process.stderr.write;
   try {
-    runValidate(makeContext(brainDir), { verbose });
-  } catch (err) {
-    if (!(err instanceof Error && err.message === "__exit__")) throw err;
+    exitCode = runValidate(makeContext(brainDir), { verbose }).exitCode;
   } finally {
-    process.exit = ORIG_EXIT;
     process.stderr.write = ORIG_STDERR;
   }
   return { exitCode, stderr: chunks.join("") };

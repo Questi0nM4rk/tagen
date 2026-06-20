@@ -1,12 +1,12 @@
 import { type Card, cardIndex, cardKey, KEBAB_NAME } from "./types.ts";
 
 export interface UsesResolution {
-  cards: Card[];
-  errors: string[];
+  readonly cards: readonly Card[];
+  readonly errors: readonly string[];
 }
 
 /** Resolve canonical `<type>/<name>` IDs declared by one card. */
-export function resolveUses(owner: Card, cards: Card[]): UsesResolution {
+export function resolveUses(owner: Card, cards: readonly Card[]): UsesResolution {
   const index = cardIndex(cards);
   const resolved: Card[] = [];
   const errors: string[] = [];
@@ -34,11 +34,17 @@ export function resolveUses(owner: Card, cards: Card[]): UsesResolution {
     }
   }
 
-  return { cards: resolved, errors };
+  return Object.freeze({
+    cards: Object.freeze(resolved),
+    errors: Object.freeze(errors),
+  });
 }
 
 /** Expand only direct uses from the original seed set. */
-export function expandDirectUses(seeds: Card[], cards: Card[]): UsesResolution {
+export function expandDirectUses(
+  seeds: readonly Card[],
+  cards: readonly Card[]
+): UsesResolution {
   const expanded = new Map(seeds.map((card) => [cardKey(card.id), card] as const));
   const errors: string[] = [];
 
@@ -48,12 +54,15 @@ export function expandDirectUses(seeds: Card[], cards: Card[]): UsesResolution {
     for (const card of result.cards) expanded.set(cardKey(card.id), card);
   }
 
-  return { cards: [...expanded.values()], errors };
+  return Object.freeze({
+    cards: Object.freeze([...expanded.values()]),
+    errors: Object.freeze(errors),
+  });
 }
 
 /** Detect cycles in the concrete uses graph and render each cycle once. */
-export function findUsesCycles(cards: Card[]): string[] {
-  const edges = new Map<string, string[]>();
+export function findUsesCycles(cards: readonly Card[]): readonly string[] {
+  const edges = new Map<string, readonly string[]>();
   for (const card of cards) {
     const owner = cardKey(card.id);
     edges.set(
@@ -86,7 +95,7 @@ export function findUsesCycles(cards: Card[]): string[] {
   };
 
   for (const node of [...edges.keys()].sort()) visit(node);
-  return [...cycles].sort().map((cycle) => `uses cycle: ${cycle}`);
+  return Object.freeze([...cycles].sort().map((cycle) => `uses cycle: ${cycle}`));
 }
 
 function isCardKey(value: string): boolean {

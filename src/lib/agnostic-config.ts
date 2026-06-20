@@ -3,24 +3,24 @@ import { join } from "node:path";
 import { errorMessage, isRecord } from "./errors.ts";
 
 export interface AdditionalTerm {
-  id: string;
-  term: string;
-  caseSensitive: boolean;
+  readonly id: string;
+  readonly term: string;
+  readonly caseSensitive: boolean;
 }
 
 export interface GuardAllowance {
-  pathPrefix: string;
-  rules: string[];
+  readonly pathPrefix: string;
+  readonly rules: readonly string[];
 }
 
 export interface AgnosticGuardConfig {
-  additionalTerms: AdditionalTerm[];
-  allow: GuardAllowance[];
+  readonly additionalTerms: readonly AdditionalTerm[];
+  readonly allow: readonly GuardAllowance[];
 }
 
 export interface ConfigLoadResult {
-  config: AgnosticGuardConfig;
-  errors: string[];
+  readonly config: AgnosticGuardConfig;
+  readonly errors: readonly string[];
 }
 
 const CONFIG_PATH = [".tagen", "agnostic-guard.json"] as const;
@@ -30,40 +30,58 @@ const ALLOW_KEYS = new Set(["pathPrefix", "rules"]);
 
 export function loadAgnosticConfig(
   root: string,
-  builtInRuleIds: ReadonlySet<string>
+  builtInRuleIds: readonly string[]
 ): ConfigLoadResult {
   const path = join(root, ...CONFIG_PATH);
-  const empty: AgnosticGuardConfig = { additionalTerms: [], allow: [] };
-  if (!existsSync(path)) return { config: empty, errors: [] };
+  const empty: AgnosticGuardConfig = Object.freeze({
+    additionalTerms: Object.freeze([]),
+    allow: Object.freeze([]),
+  });
+  if (!existsSync(path)) return configLoadResult(empty, []);
 
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
-    return {
-      config: empty,
-      errors: [`${CONFIG_PATH.join("/")}: invalid JSON: ${errorMessage(error)}`],
-    };
+    return configLoadResult(empty, [
+      `${CONFIG_PATH.join("/")}: invalid JSON: ${errorMessage(error)}`,
+    ]);
   }
   if (!isRecord(raw)) {
-    return {
-      config: empty,
-      errors: [`${CONFIG_PATH.join("/")}: config must be a JSON object`],
-    };
+    return configLoadResult(empty, [
+      `${CONFIG_PATH.join("/")}: config must be a JSON object`,
+    ]);
   }
 
   const errors: string[] = [];
   rejectUnknownKeys(raw, TOP_LEVEL_KEYS, "config", errors);
   if (raw.version !== 1) errors.push("config: version must be 1");
 
-  const additionalTerms = parseTerms(raw.additionalTerms, builtInRuleIds, errors);
+  const reservedIds = new Set(builtInRuleIds);
+  const additionalTerms = parseTerms(raw.additionalTerms, reservedIds, errors);
   const knownRuleIds = new Set([
-    ...builtInRuleIds,
+    ...reservedIds,
     ...additionalTerms.map((term) => term.id),
   ]);
   const allow = parseAllowances(raw.allow, knownRuleIds, errors);
 
-  return { config: { additionalTerms, allow }, errors };
+  return configLoadResult(
+    Object.freeze({
+      additionalTerms: Object.freeze(additionalTerms),
+      allow: Object.freeze(allow),
+    }),
+    errors
+  );
+}
+
+function configLoadResult(
+  config: AgnosticGuardConfig,
+  errors: readonly string[]
+): ConfigLoadResult {
+  return Object.freeze({
+    config,
+    errors: Object.freeze([...errors]),
+  });
 }
 
 function parseTerms(
@@ -105,7 +123,7 @@ function parseTerms(
       errors.push(`${tag}.caseSensitive must be a boolean`);
       continue;
     }
-    out.push({ id, term, caseSensitive });
+    out.push(Object.freeze({ id, term, caseSensitive }));
   }
   return out;
 }
@@ -145,7 +163,7 @@ function parseAllowances(
     for (const rule of rules) {
       if (!knownRuleIds.has(rule)) errors.push(`${tag}: unknown rule id '${rule}'`);
     }
-    out.push({ pathPrefix, rules });
+    out.push(Object.freeze({ pathPrefix, rules: Object.freeze([...rules]) }));
   }
   return out;
 }

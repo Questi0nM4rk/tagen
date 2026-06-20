@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { loadAllCards, marketplaceRoot } from "../src/lib/catalog.ts";
 import {
   type ComposeQuery,
   compose,
   emptyQuery,
   knownTypesFromCards,
-} from "../src/lib/compose.ts";
+} from "../src/composition/index.ts";
+import { loadAllCards, marketplaceRoot } from "../src/lib/catalog.ts";
 
 const BRAIN = join(import.meta.dir, "fixtures", "brain");
 const ROOT = marketplaceRoot(BRAIN);

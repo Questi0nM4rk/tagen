@@ -8,7 +8,7 @@ import { type Card, type CardId, cardKey } from "./types.ts";
  * Pure detection — caller decides whether to surface as `tagen validate`
  * violations, `tagen get` errors, or both.
  */
-export function findAliasCollisions(cards: Card[]): string[] {
+export function findAliasCollisions(cards: readonly Card[]): readonly string[] {
   const errors: string[] = [];
   const canonical = new Map<string, CardId>();
   for (const c of cards) canonical.set(c.id.name.toLowerCase(), c.id);
@@ -33,5 +33,5 @@ export function findAliasCollisions(cards: Card[]): string[] {
       }
     }
   }
-  return errors;
+  return Object.freeze(errors);
 }
