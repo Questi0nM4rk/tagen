@@ -4,15 +4,15 @@ import type { AgnosticGuardConfig } from "./agnostic-config.ts";
 import { rel } from "./catalog.ts";
 
 interface GuardRule {
-  id: string;
-  pattern: RegExp;
+  readonly id: string;
+  readonly pattern: RegExp;
 }
 
 export interface HarnessLeak {
-  path: string;
-  line: number;
-  ruleId: string;
-  token: string;
+  readonly path: string;
+  readonly line: number;
+  readonly ruleId: string;
+  readonly token: string;
 }
 
 const SCANNED_EXTENSIONS = new Set([".md", ".json", ".ts", ".yaml", ".yml", ".toml"]);
@@ -48,15 +48,17 @@ const BUILT_IN_RULES: readonly GuardRule[] = [
   },
 ];
 
-export const BUILT_IN_RULE_IDS: ReadonlySet<string> = new Set(
-  BUILT_IN_RULES.map((rule) => rule.id)
-);
+const BUILT_IN_RULE_IDS = Object.freeze(BUILT_IN_RULES.map((rule) => rule.id));
+
+export function builtInRuleIds(): readonly string[] {
+  return BUILT_IN_RULE_IDS;
+}
 
 export function findHarnessLeaks(
   brainDir: string,
   root: string,
   config: AgnosticGuardConfig
-): HarnessLeak[] {
+): readonly HarnessLeak[] {
   const rules = [
     ...BUILT_IN_RULES,
     ...config.additionalTerms.map((term) => ({
@@ -74,21 +76,25 @@ export function findHarnessLeaks(
         if (isAllowed(relativePath, rule.id, config)) continue;
         rule.pattern.lastIndex = 0;
         for (const match of line.matchAll(rule.pattern)) {
-          leaks.push({
-            path: relativePath,
-            line: index + 1,
-            ruleId: rule.id,
-            token: match[0].trim(),
-          });
+          leaks.push(
+            Object.freeze({
+              path: relativePath,
+              line: index + 1,
+              ruleId: rule.id,
+              token: match[0].trim(),
+            })
+          );
         }
       }
     }
   }
-  return leaks.sort(
-    (a, b) =>
-      a.path.localeCompare(b.path) ||
-      a.line - b.line ||
-      a.ruleId.localeCompare(b.ruleId)
+  return Object.freeze(
+    leaks.sort(
+      (a, b) =>
+        a.path.localeCompare(b.path) ||
+        a.line - b.line ||
+        a.ruleId.localeCompare(b.ruleId)
+    )
   );
 }
 

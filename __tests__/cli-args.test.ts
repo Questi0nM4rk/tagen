@@ -1,19 +1,50 @@
 import { describe, expect, test } from "bun:test";
 import { parseCommandArgs } from "../src/cli/args.ts";
-import { booleanFlag, repeatableValueFlag, valueFlag } from "../src/cli/command.ts";
+import {
+  AllowPositionalArguments,
+  ForbidPositionalArguments,
+} from "../src/cli/command.ts";
+import {
+  BooleanParameter,
+  RepeatableValueParameter,
+  ValueParameter,
+} from "../src/cli/parameter.ts";
 
-const TYPE_FLAG = valueFlag("--type", "--type T", "type");
-const PIN_FLAG = repeatableValueFlag("--pin", "--pin T=N", "pin");
-const JSON_FLAG = booleanFlag("--json", "--json", "json");
+class TypeParameter extends ValueParameter<"--type"> {
+  constructor() {
+    super("--type", "--type T", "type");
+  }
+}
+
+class PinParameter extends RepeatableValueParameter<"--pin"> {
+  constructor() {
+    super("--pin", "--pin T=N", "pin");
+  }
+}
+
+class JsonParameter extends BooleanParameter<"--json"> {
+  constructor() {
+    super("--json", "--json", "json");
+  }
+}
+
+const TYPE_PARAMETER = new TypeParameter();
+const PIN_PARAMETER = new PinParameter();
+const JSON_PARAMETER = new JsonParameter();
 const KNOWN_FLAGS = new Set(["--type", "--pin", "--json"]);
+const isKnownFlag = (name: string): boolean => KNOWN_FLAGS.has(name);
 
 describe("parseCommandArgs", () => {
   test("rejects an unknown option", () => {
     expect(() =>
       parseCommandArgs(
         ["--bogus"],
-        { name: "example", flags: [], positional: "allow" },
-        KNOWN_FLAGS
+        {
+          name: "example",
+          parameters: [],
+          positionals: new AllowPositionalArguments(),
+        },
+        isKnownFlag
       )
     ).toThrow("unknown option: --bogus");
   });
@@ -22,8 +53,12 @@ describe("parseCommandArgs", () => {
     expect(() =>
       parseCommandArgs(
         ["--type"],
-        { name: "example", flags: [TYPE_FLAG], positional: "allow" },
-        KNOWN_FLAGS
+        {
+          name: "example",
+          parameters: [TYPE_PARAMETER],
+          positionals: new AllowPositionalArguments(),
+        },
+        isKnownFlag
       )
     ).toThrow("--type requires a value");
   });
@@ -32,8 +67,12 @@ describe("parseCommandArgs", () => {
     expect(() =>
       parseCommandArgs(
         ["--type", "lang", "--type", "review"],
-        { name: "example", flags: [TYPE_FLAG], positional: "allow" },
-        KNOWN_FLAGS
+        {
+          name: "example",
+          parameters: [TYPE_PARAMETER],
+          positionals: new AllowPositionalArguments(),
+        },
+        isKnownFlag
       )
     ).toThrow("--type may not be repeated");
   });
@@ -41,18 +80,28 @@ describe("parseCommandArgs", () => {
   test("preserves every value for a repeatable flag", () => {
     const parsed = parseCommandArgs(
       ["--pin", "lang=rust", "--pin", "review=strict"],
-      { name: "example", flags: [PIN_FLAG], positional: "allow" },
-      KNOWN_FLAGS
+      {
+        name: "example",
+        parameters: [PIN_PARAMETER],
+        positionals: new AllowPositionalArguments(),
+      },
+      isKnownFlag
     );
-    expect(parsed.values(PIN_FLAG)).toEqual(["lang=rust", "review=strict"]);
+    expect(parsed.values(PIN_PARAMETER)).toEqual(["lang=rust", "review=strict"]);
+    expect(Object.isFrozen(parsed.values(PIN_PARAMETER))).toBe(true);
+    expect(Object.isFrozen(parsed.positional)).toBe(true);
   });
 
   test("rejects positional arguments when forbidden", () => {
     expect(() =>
       parseCommandArgs(
         ["ignored"],
-        { name: "example", flags: [JSON_FLAG], positional: "forbid" },
-        KNOWN_FLAGS
+        {
+          name: "example",
+          parameters: [JSON_PARAMETER],
+          positionals: new ForbidPositionalArguments(),
+        },
+        isKnownFlag
       )
     ).toThrow("unexpected positional argument for 'example': ignored");
   });

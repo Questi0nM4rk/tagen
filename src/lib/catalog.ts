@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { parseCore } from "./frontmatter.ts";
+import { ImmutableMap } from "./immutable-collections.ts";
 import type { Card, CardId, Protocol } from "./types.ts";
 
 export const MAX_DISCOVERY_HOPS = 10;
@@ -9,13 +10,13 @@ export const CORE_FILE = "CORE.md";
 
 export interface LoadResult {
   /** All non-protocol cards. */
-  cards: Card[];
+  readonly cards: readonly Card[];
   /** Protocol cards (also present in `cards`, with protocol-specific paths). */
-  protocols: Protocol[];
+  readonly protocols: readonly Protocol[];
   /** Per-card frontmatter parse errors keyed by `<type>/<name>`. */
-  frontmatterErrors: Map<string, string[]>;
+  readonly frontmatterErrors: ReadonlyMap<string, readonly string[]>;
   /** Catalog-shape errors that prevent safely loading a card. */
-  catalogErrors: string[];
+  readonly catalogErrors: readonly string[];
 }
 
 /**
@@ -73,13 +74,13 @@ export function loadAllCards(brainDir: string): LoadResult {
   const root = marketplaceRoot(brainDir);
   const cards: Card[] = [];
   const protocols: Protocol[] = [];
-  const frontmatterErrors = new Map<string, string[]>();
+  const frontmatterErrors = new Map<string, readonly string[]>();
   const brainStat = lstatSync(brainDir);
   const catalogErrors = brainStat.isSymbolicLink()
     ? ["brain: symlinks are not allowed under brain/"]
     : findSymlinkErrors(brainDir, root);
   if (brainStat.isSymbolicLink()) {
-    return { cards, protocols, frontmatterErrors, catalogErrors };
+    return freezeLoadResult(cards, protocols, frontmatterErrors, catalogErrors);
   }
 
   for (const type of readdirSync(brainDir).sort()) {
@@ -116,18 +117,18 @@ export function loadAllCards(brainDir: string): LoadResult {
       const source = readFileSync(corePath, "utf8");
       const parsed = parseCore(source, type);
       if (parsed.errors.length > 0) {
-        frontmatterErrors.set(`${type}/${name}`, parsed.errors);
+        frontmatterErrors.set(`${type}/${name}`, Object.freeze([...parsed.errors]));
       }
 
-      const card: Card = {
-        id,
+      const card: Card = Object.freeze({
+        id: Object.freeze(id),
         dirPath: cardDir,
         corePath,
         frontmatter: parsed.frontmatter,
         body: parsed.body,
-        references: listFiles(join(cardDir, "references"), ".md", root),
-        validators: listFiles(join(cardDir, "validators"), ".ts", root),
-      };
+        references: Object.freeze(listFiles(join(cardDir, "references"), ".md", root)),
+        validators: Object.freeze(listFiles(join(cardDir, "validators"), ".ts", root)),
+      });
       cards.push(card);
 
       if (type === "protocol") {
@@ -136,7 +137,21 @@ export function loadAllCards(brainDir: string): LoadResult {
     }
   }
 
-  return { cards, protocols, frontmatterErrors, catalogErrors };
+  return freezeLoadResult(cards, protocols, frontmatterErrors, catalogErrors);
+}
+
+function freezeLoadResult(
+  cards: Card[],
+  protocols: Protocol[],
+  frontmatterErrors: Map<string, readonly string[]>,
+  catalogErrors: string[]
+): LoadResult {
+  return Object.freeze({
+    cards: Object.freeze(cards),
+    protocols: Object.freeze(protocols),
+    frontmatterErrors: new ImmutableMap(frontmatterErrors),
+    catalogErrors: Object.freeze(catalogErrors),
+  });
 }
 
 function findSymlinkErrors(dir: string, root: string): string[] {
@@ -153,17 +168,17 @@ function findSymlinkErrors(dir: string, root: string): string[] {
 }
 
 function toProtocol(card: Card, root: string): Protocol {
-  return {
+  return Object.freeze({
     ...card,
     schemaPath: rel(join(card.dirPath, "schema.json"), root),
     validatorPath: rel(join(card.dirPath, "validator.ts"), root),
-    validExamples: listFiles(join(card.dirPath, "examples", "valid"), ".json", root),
-    invalidExamples: listFiles(
-      join(card.dirPath, "examples", "invalid"),
-      ".json",
-      root
+    validExamples: Object.freeze(
+      listFiles(join(card.dirPath, "examples", "valid"), ".json", root)
     ),
-  };
+    invalidExamples: Object.freeze(
+      listFiles(join(card.dirPath, "examples", "invalid"), ".json", root)
+    ),
+  });
 }
 
 function listFiles(dir: string, ext: string, root: string): string[] {

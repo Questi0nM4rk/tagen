@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { compose, emptyQuery, knownTypesFromCards } from "../src/composition/index.ts";
 import { loadAllCards, marketplaceRoot } from "../src/lib/catalog.ts";
-import { compose, emptyQuery, knownTypesFromCards } from "../src/lib/compose.ts";
 
 const PERF_BUDGET_MS = 500;
 const CARD_COUNT = 100;

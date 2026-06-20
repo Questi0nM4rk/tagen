@@ -1,46 +1,81 @@
-import type { CommandFlag, ParsedCommandArgs, PositionalPolicy } from "./command.ts";
+import type { CommandArgumentSpec } from "./command.ts";
 import { fail } from "./errors.ts";
+import {
+  BooleanParameter,
+  type CommandParameter,
+  RepeatableValueParameter,
+  ValueParameter,
+} from "./parameter.ts";
 
-export interface CommandArgSpec {
-  readonly name: string;
-  readonly flags: readonly CommandFlag[];
-  readonly positional: PositionalPolicy;
+export class ParsedCommandArgs {
+  readonly positional: readonly string[];
+  readonly #values: ReadonlyMap<CommandParameter, readonly string[]>;
+  readonly #booleans: ReadonlySet<BooleanParameter>;
+
+  constructor(
+    positional: readonly string[],
+    values: ReadonlyMap<CommandParameter, readonly string[]>,
+    booleans: ReadonlySet<BooleanParameter>
+  ) {
+    this.positional = Object.freeze([...positional]);
+    this.#values = new Map(
+      [...values].map(([parameter, items]) => [parameter, Object.freeze([...items])])
+    );
+    this.#booleans = new Set(booleans);
+  }
+
+  value<Name extends string>(parameter: ValueParameter<Name>): string | undefined {
+    return this.#values.get(parameter)?.[0];
+  }
+
+  values<Name extends string>(
+    parameter: RepeatableValueParameter<Name>
+  ): readonly string[] {
+    return this.#values.get(parameter) ?? [];
+  }
+
+  has<Name extends string>(parameter: BooleanParameter<Name>): boolean {
+    return this.#booleans.has(parameter);
+  }
 }
 
 export function parseCommandArgs(
   argv: readonly string[],
-  command: CommandArgSpec,
-  knownFlagNames: ReadonlySet<string>
+  command: CommandArgumentSpec,
+  isKnownParameter: (name: string) => boolean
 ): ParsedCommandArgs {
   const positional: string[] = [];
-  const values = new Map<string, string[]>();
-  const booleans = new Set<string>();
+  const values = new Map<CommandParameter, readonly string[]>();
+  const booleans = new Set<BooleanParameter>();
 
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index];
     if (argument === undefined) continue;
 
-    const flag = findFlag(command.flags, argument);
-    if (flag?.kind === "boolean") {
-      if (booleans.has(flag.name)) fail(`${flag.name} may not be repeated`);
-      booleans.add(flag.name);
+    const parameter = command.parameters.find((item) => item.name === argument);
+    if (parameter instanceof BooleanParameter) {
+      if (booleans.has(parameter)) fail(`${parameter.name} may not be repeated`);
+      booleans.add(parameter);
       continue;
     }
-    if (flag?.kind === "value") {
-      const existing = values.get(flag.name);
-      if (!flag.repeatable && existing !== undefined) {
-        fail(`${flag.name} may not be repeated`);
+    if (
+      parameter instanceof ValueParameter ||
+      parameter instanceof RepeatableValueParameter
+    ) {
+      const existing = values.get(parameter);
+      if (parameter instanceof ValueParameter && existing !== undefined) {
+        fail(`${parameter.name} may not be repeated`);
       }
       const value = argv[index + 1];
       if (value === undefined || value.startsWith("-")) {
-        fail(`${flag.name} requires a value`);
+        fail(`${parameter.name} requires a value`);
       }
-      values.set(flag.name, [...(existing ?? []), value]);
+      values.set(parameter, [...(existing ?? []), value]);
       index++;
       continue;
     }
     if (argument.startsWith("-")) {
-      if (knownFlagNames.has(argument)) {
+      if (isKnownParameter(argument)) {
         fail(`${argument} is not valid for '${command.name}'`);
       }
       fail(`unknown option: ${argument}`);
@@ -48,27 +83,7 @@ export function parseCommandArgs(
     positional.push(argument);
   }
 
-  if (command.positional === "forbid" && positional.length > 0) {
-    fail(`unexpected positional argument for '${command.name}': ${positional[0]}`);
-  }
+  command.positionals.validate(command.name, positional);
 
-  return {
-    positional,
-    value(flag) {
-      return values.get(flag.name)?.[0];
-    },
-    values(flag) {
-      return values.get(flag.name) ?? [];
-    },
-    has(flag) {
-      return booleans.has(flag.name);
-    },
-  };
-}
-
-function findFlag(
-  flags: readonly CommandFlag[],
-  name: string
-): CommandFlag | undefined {
-  return flags.find((flag) => flag.name === name);
+  return new ParsedCommandArgs(positional, values, booleans);
 }

@@ -21,9 +21,17 @@ const ALLOWED_FIELDS: Record<CardType, readonly string[]> = {
 };
 
 export interface ParseResult {
-  frontmatter: CardFrontmatter;
-  body: string;
-  errors: string[];
+  readonly frontmatter: CardFrontmatter;
+  readonly body: string;
+  readonly errors: readonly string[];
+}
+
+interface MutableCardFrontmatter {
+  description: string;
+  aliases?: readonly string[];
+  requires?: readonly CardType[];
+  uses?: readonly string[];
+  subagents?: readonly string[];
 }
 
 /** Allowed-field set for a type. Unknown types fall back to common fields. */
@@ -38,12 +46,12 @@ function allowedFor(type: CardType): readonly string[] {
  */
 export function parseCore(source: string, type: CardType): ParseResult {
   const errors: string[] = [];
-  const empty: CardFrontmatter = { description: "" };
+  const empty: CardFrontmatter = Object.freeze({ description: "" });
 
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
   if (!match) {
     errors.push("CORE.md missing YAML frontmatter");
-    return { frontmatter: empty, body: source, errors };
+    return parseResult(empty, source, errors);
   }
 
   const yamlText = match[1] ?? "";
@@ -55,12 +63,12 @@ export function parseCore(source: string, type: CardType): ParseResult {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     errors.push(`CORE.md frontmatter parse error: ${msg}`);
-    return { frontmatter: empty, body, errors };
+    return parseResult(empty, body, errors);
   }
 
   if (!isRecord(raw)) {
     errors.push("CORE.md frontmatter must be a YAML mapping");
-    return { frontmatter: empty, body, errors };
+    return parseResult(empty, body, errors);
   }
 
   const fm = raw;
@@ -76,7 +84,7 @@ export function parseCore(source: string, type: CardType): ParseResult {
     errors.push("missing required frontmatter field: description");
   }
 
-  const out: CardFrontmatter = {
+  const out: MutableCardFrontmatter = {
     description: typeof description === "string" ? description : "",
   };
 
@@ -85,7 +93,7 @@ export function parseCore(source: string, type: CardType): ParseResult {
     if (!isStringArray(aliases)) {
       errors.push("aliases must be an array of strings");
     } else {
-      out.aliases = aliases;
+      out.aliases = Object.freeze([...aliases]);
     }
   }
 
@@ -94,7 +102,7 @@ export function parseCore(source: string, type: CardType): ParseResult {
     if (!isStringArray(requires)) {
       errors.push("requires must be an array of strings");
     } else {
-      out.requires = requires;
+      out.requires = Object.freeze([...requires]);
     }
   }
 
@@ -104,7 +112,7 @@ export function parseCore(source: string, type: CardType): ParseResult {
       if (!isStringArray(uses)) {
         errors.push("uses must be an array of strings");
       } else {
-        out.uses = uses;
+        out.uses = Object.freeze([...uses]);
       }
     }
   }
@@ -115,12 +123,24 @@ export function parseCore(source: string, type: CardType): ParseResult {
       if (!isStringArray(subagents)) {
         errors.push("subagents must be an array of strings");
       } else {
-        out.subagents = subagents;
+        out.subagents = Object.freeze([...subagents]);
       }
     }
   }
 
-  return { frontmatter: out, body, errors };
+  return parseResult(Object.freeze(out), body, errors);
+}
+
+function parseResult(
+  frontmatter: CardFrontmatter,
+  body: string,
+  errors: string[]
+): ParseResult {
+  return Object.freeze({
+    frontmatter,
+    body,
+    errors: Object.freeze(errors),
+  });
 }
 
 function isStringArray(value: unknown): value is string[] {

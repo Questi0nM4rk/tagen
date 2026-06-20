@@ -1,92 +1,93 @@
-import type { LoadResult } from "../lib/catalog.ts";
-
-export type CatalogPolicy = "clean" | "diagnostic";
-export type PositionalPolicy = "allow" | "forbid";
-
-export interface ValueFlag<
-  Name extends string = string,
-  Repeatable extends boolean = boolean,
-> {
-  readonly name: Name;
-  readonly kind: "value";
-  readonly repeatable: Repeatable;
-  readonly usage: string;
-  readonly description: string;
-}
-
-export interface BooleanFlag<Name extends string = string> {
-  readonly name: Name;
-  readonly kind: "boolean";
-  readonly usage: string;
-  readonly description: string;
-}
-
-export type CommandFlag = ValueFlag | BooleanFlag;
-
-export interface ParsedCommandArgs {
-  readonly positional: readonly string[];
-  value<Name extends string>(flag: ValueFlag<Name, false>): string | undefined;
-  values<Name extends string>(flag: ValueFlag<Name, true>): readonly string[];
-  has<Name extends string>(flag: BooleanFlag<Name>): boolean;
-}
+import { findBrainDir, type LoadResult, resolveBrainDir } from "../lib/catalog.ts";
+import type { ParsedCommandArgs } from "./args.ts";
+import { fail, failCatalogLoad } from "./errors.ts";
+import type { CommandParameter, ValueParameter } from "./parameter.ts";
+import type { CommandResult } from "./result.ts";
 
 export interface CommandContext extends LoadResult {
   readonly brainDir: string;
   readonly root: string;
 }
 
-export interface CatalogConfig {
-  readonly policy: CatalogPolicy;
-  readonly rootFlag?: ValueFlag<string, false>;
+export abstract class PositionalArgumentsPolicy {
+  abstract validate(commandName: string, values: readonly string[]): void;
 }
 
-interface CommandDefinition<Name extends string, Options> {
-  readonly name: Name;
+export class AllowPositionalArguments extends PositionalArgumentsPolicy {
+  validate(): void {}
+}
+
+export class ForbidPositionalArguments extends PositionalArgumentsPolicy {
+  validate(commandName: string, values: readonly string[]): void {
+    const first = values[0];
+    if (first !== undefined) {
+      fail(`unexpected positional argument for '${commandName}': ${first}`);
+    }
+  }
+}
+
+export abstract class CatalogPolicy {
+  readonly rootParameter: ValueParameter | undefined;
+
+  constructor(rootParameter?: ValueParameter) {
+    this.rootParameter = rootParameter;
+  }
+
+  resolveBrainDir(args: ParsedCommandArgs): string {
+    const root =
+      this.rootParameter === undefined ? undefined : args.value(this.rootParameter);
+    return root === undefined ? findBrainDir() : resolveBrainDir(root);
+  }
+
+  abstract assertLoadable(result: LoadResult): void;
+}
+
+export class CleanCatalogPolicy extends CatalogPolicy {
+  assertLoadable(result: LoadResult): void {
+    if (result.catalogErrors.length > 0 || result.frontmatterErrors.size > 0) {
+      failCatalogLoad(result);
+    }
+  }
+}
+
+export class DiagnosticCatalogPolicy extends CatalogPolicy {
+  assertLoadable(): void {}
+}
+
+export interface CommandArgumentSpec {
+  readonly name: string;
+  readonly parameters: readonly CommandParameter[];
+  readonly positionals: PositionalArgumentsPolicy;
+}
+
+export interface CommandMetadata extends CommandArgumentSpec {
   readonly summary: string;
-  readonly flags: readonly CommandFlag[];
-  readonly positional: PositionalPolicy;
-  readonly positionalHelp?: readonly string[];
-  readonly catalog: CatalogConfig;
-  decode(args: ParsedCommandArgs): Options;
-  execute(context: CommandContext, options: Options): void | Promise<void>;
+  readonly catalog: CatalogPolicy;
+  readonly positionalHelp: readonly string[];
+  run(
+    context: CommandContext,
+    args: ParsedCommandArgs
+  ): CommandResult | Promise<CommandResult>;
 }
 
-export interface CommandDescriptor<Name extends string, Options>
-  extends CommandDefinition<Name, Options> {
-  run(context: CommandContext, args: ParsedCommandArgs): void | Promise<void>;
-}
+export abstract class Command<Name extends string, Options> implements CommandMetadata {
+  abstract readonly name: Name;
+  abstract readonly summary: string;
+  abstract readonly parameters: readonly CommandParameter[];
+  abstract readonly positionals: PositionalArgumentsPolicy;
+  abstract readonly catalog: CatalogPolicy;
+  readonly positionalHelp: readonly string[] = Object.freeze([]);
 
-export function defineCommand<Name extends string, Options>(
-  definition: CommandDefinition<Name, Options>
-): CommandDescriptor<Name, Options> {
-  return {
-    ...definition,
-    run(context, args) {
-      return definition.execute(context, definition.decode(args));
-    },
-  };
-}
+  protected abstract decode(args: ParsedCommandArgs): Options;
+  protected abstract execute(
+    context: CommandContext,
+    options: Options
+  ): CommandResult | Promise<CommandResult>;
 
-export function valueFlag<Name extends string>(
-  name: Name,
-  usage: string,
-  description: string
-): ValueFlag<Name, false> {
-  return { name, kind: "value", repeatable: false, usage, description };
-}
-
-export function repeatableValueFlag<Name extends string>(
-  name: Name,
-  usage: string,
-  description: string
-): ValueFlag<Name, true> {
-  return { name, kind: "value", repeatable: true, usage, description };
-}
-
-export function booleanFlag<Name extends string>(
-  name: Name,
-  usage: string,
-  description: string
-): BooleanFlag<Name> {
-  return { name, kind: "boolean", usage, description };
+  run(
+    context: CommandContext,
+    args: ParsedCommandArgs
+  ): CommandResult | Promise<CommandResult> {
+    return this.execute(context, this.decode(args));
+  }
 }

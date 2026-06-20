@@ -1,43 +1,65 @@
+import type { ParsedCommandArgs } from "../cli/args.ts";
 import {
-  booleanFlag,
-  defineCommand,
-  type ParsedCommandArgs,
-  repeatableValueFlag,
+  AllowPositionalArguments,
+  CleanCatalogPolicy,
+  Command,
+  type CommandContext,
 } from "../cli/command.ts";
 import { fail } from "../cli/errors.ts";
-import { ROOT_FLAG } from "../cli/root.ts";
-import { type ComposeQuery, compose, knownTypesFromCards } from "../lib/compose.ts";
+import { BooleanParameter, RepeatableValueParameter } from "../cli/parameter.ts";
+import { CommandResult } from "../cli/result.ts";
+import { ROOT_PARAMETER } from "../cli/root.ts";
+import {
+  type ComposeQuery,
+  compose,
+  knownTypesFromCards,
+} from "../composition/index.ts";
+import { ImmutableMap } from "../lib/immutable-collections.ts";
 import type { Card, CardId } from "../lib/types.ts";
 import { runList } from "./list.ts";
 
-const TYPE_FLAG = repeatableValueFlag(
-  "--type",
-  "--type T",
-  "Select an explicit card type (paired with --name)"
-);
-const NAME_FLAG = repeatableValueFlag(
-  "--name",
-  "--name N",
-  "Select an explicit card name (paired with --type)"
-);
-const PIN_FLAG = repeatableValueFlag(
-  "--pin",
-  "--pin <type>=<name>",
-  "Force a card to fill a slot"
-);
-const JSON_FLAG = booleanFlag(
-  "--json",
-  "--json",
-  "Machine-readable manifest (default)"
-);
-
-export interface GetOptions {
-  json: boolean;
+class TypeParameter extends RepeatableValueParameter<"--type"> {
+  constructor() {
+    super("--type", "--type T", "Select an explicit card type (paired with --name)");
+  }
 }
 
-interface GetCommandOptions {
-  query: ComposeQuery;
-  output: GetOptions;
+class NameParameter extends RepeatableValueParameter<"--name"> {
+  constructor() {
+    super("--name", "--name N", "Select an explicit card name (paired with --type)");
+  }
+}
+
+class PinParameter extends RepeatableValueParameter<"--pin"> {
+  constructor() {
+    super("--pin", "--pin <type>=<name>", "Force a card to fill a slot");
+  }
+}
+
+class JsonParameter extends BooleanParameter<"--json"> {
+  constructor() {
+    super("--json", "--json", "Machine-readable manifest (default)");
+  }
+}
+
+const TYPE_PARAMETER = Object.freeze(new TypeParameter());
+const NAME_PARAMETER = Object.freeze(new NameParameter());
+const PIN_PARAMETER = Object.freeze(new PinParameter());
+const JSON_PARAMETER = Object.freeze(new JsonParameter());
+
+export interface GetOptions {
+  readonly json: boolean;
+}
+
+class GetCommandOptions {
+  readonly query: ComposeQuery;
+  readonly output: GetOptions;
+
+  constructor(query: ComposeQuery, output: GetOptions) {
+    this.query = query;
+    this.output = Object.freeze({ ...output });
+    Object.freeze(this);
+  }
 }
 
 /**
@@ -50,29 +72,29 @@ interface GetCommandOptions {
  *   2 — empty match set
  */
 export function runGet(
-  cards: Card[],
+  cards: readonly Card[],
   root: string,
   query: ComposeQuery,
   opts: GetOptions
-): void {
+): CommandResult {
   const knownTypes = knownTypesFromCards(cards);
   const outcome = compose(cards, root, query, knownTypes);
 
   if (outcome.errors.length > 0) {
     for (const e of outcome.errors) process.stderr.write(`tagen: ${e}\n`);
-    process.exit(1);
+    return CommandResult.failure(1);
   }
 
   if (outcome.browseTypes.length > 0 && !outcome.manifest) {
     for (const type of outcome.browseTypes) {
       runList(cards, { json: opts.json, type, aliases: false });
     }
-    return;
+    return CommandResult.SUCCESS;
   }
 
   if (outcome.emptyMatch || !outcome.manifest) {
     process.stderr.write("tagen: no cards matched the query\n");
-    process.exit(2);
+    return CommandResult.failure(2);
   }
 
   for (const w of outcome.manifest.warnings) {
@@ -81,7 +103,7 @@ export function runGet(
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify(outcome.manifest, null, 2)}\n`);
-    return;
+    return CommandResult.SUCCESS;
   }
 
   const m = outcome.manifest;
@@ -89,16 +111,14 @@ export function runGet(
     `${m.modules.length} card(s), ${m.slots.length} slot(s), ${m.warnings.length} warning(s).\n`
   );
   process.stdout.write("Use --json for the full manifest.\n");
+  return CommandResult.SUCCESS;
 }
 
 export function buildComposeQuery(args: ParsedCommandArgs): ComposeQuery {
-  const query: ComposeQuery = {
-    positional: [...args.positional],
-    explicit: [],
-    pins: new Map(),
-  };
-  const types = args.values(TYPE_FLAG);
-  const names = args.values(NAME_FLAG);
+  const explicit: CardId[] = [];
+  const pins = new Map<string, string>();
+  const types = args.values(TYPE_PARAMETER);
+  const names = args.values(NAME_PARAMETER);
   if (types.length !== names.length) {
     fail("--type and --name must be paired");
   }
@@ -109,36 +129,52 @@ export function buildComposeQuery(args: ParsedCommandArgs): ComposeQuery {
       throw new Error("paired --type/--name arguments were not preserved");
     }
     const id: CardId = { type, name };
-    query.explicit.push(id);
+    explicit.push(Object.freeze(id));
   }
 
-  for (const pin of args.values(PIN_FLAG)) {
+  for (const pin of args.values(PIN_PARAMETER)) {
     const separator = pin.indexOf("=");
     if (separator <= 0 || separator === pin.length - 1) {
       fail(`invalid --pin '${pin}', expected <type>=<name>`);
     }
-    query.pins.set(pin.slice(0, separator), pin.slice(separator + 1));
+    pins.set(pin.slice(0, separator), pin.slice(separator + 1));
   }
-  return query;
+  return Object.freeze({
+    positional: Object.freeze([...args.positional]),
+    explicit: Object.freeze(explicit),
+    pins: new ImmutableMap(pins),
+  });
 }
 
-export const getCommand = defineCommand({
-  name: "get",
-  summary: "Resolve a composition into a JSON manifest (--json)",
-  flags: [TYPE_FLAG, NAME_FLAG, PIN_FLAG, JSON_FLAG, ROOT_FLAG],
-  positional: "allow",
-  positionalHelp: [
+export class GetCommand extends Command<"get", GetCommandOptions> {
+  readonly name = "get";
+  readonly summary = "Resolve a composition into a JSON manifest (--json)";
+  readonly parameters = Object.freeze([
+    TYPE_PARAMETER,
+    NAME_PARAMETER,
+    PIN_PARAMETER,
+    JSON_PARAMETER,
+    ROOT_PARAMETER,
+  ]);
+  readonly positionals = Object.freeze(new AllowPositionalArguments());
+  readonly positionalHelp = Object.freeze([
     "<args>...        Positional, fuzzy-matched against canonical names + aliases",
     "                 (min 3 chars). A bare type-name triggers browse intent.",
-  ],
-  catalog: { policy: "clean", rootFlag: ROOT_FLAG },
-  decode(args): GetCommandOptions {
-    return {
-      query: buildComposeQuery(args),
-      output: { json: args.has(JSON_FLAG) },
-    };
-  },
-  execute(context, options) {
-    runGet(context.cards, context.root, options.query, options.output);
-  },
-});
+  ]);
+  readonly catalog = Object.freeze(new CleanCatalogPolicy(ROOT_PARAMETER));
+
+  protected decode(args: ParsedCommandArgs): GetCommandOptions {
+    return new GetCommandOptions(buildComposeQuery(args), {
+      json: args.has(JSON_PARAMETER),
+    });
+  }
+
+  protected execute(
+    context: CommandContext,
+    options: GetCommandOptions
+  ): CommandResult {
+    return runGet(context.cards, context.root, options.query, options.output);
+  }
+}
+
+export const getCommand = Object.freeze(new GetCommand());

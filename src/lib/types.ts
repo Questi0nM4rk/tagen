@@ -4,12 +4,13 @@
  * Card identity is the dir path: type = parent dir name, name = card dir name.
  * Frontmatter carries no `type:` or `name:` — the filesystem is the taxonomy.
  */
+import { ImmutableMap } from "./immutable-collections.ts";
 
 export type CardType = string;
 
 export interface CardId {
-  type: CardType;
-  name: string;
+  readonly type: CardType;
+  readonly name: string;
 }
 
 /** Canonical "<type>/<name>" key used by every index, error message, and CLI output. */
@@ -20,79 +21,80 @@ export function cardKey(id: CardId): string {
 /** Type and card dir names must match this — enforced by `tagen validate`. */
 export const KEBAB_NAME = /^[a-z][a-z0-9-]*$/;
 
-/** Card types allowed to declare `subagents:` and ship `validators/`. */
-export const SUBAGENT_HOST_TYPES: ReadonlySet<CardType> = new Set([
-  "review",
-  "methodology",
-]);
+const SUBAGENT_HOST_TYPES = new Set<CardType>(["review", "methodology"]);
+
+/** Whether a card type may declare `subagents:` and ship `validators/`. */
+export function isSubagentHostType(type: CardType): boolean {
+  return SUBAGENT_HOST_TYPES.has(type);
+}
 
 export interface CardFrontmatter {
-  description: string;
-  aliases?: string[];
-  requires?: CardType[];
+  readonly description: string;
+  readonly aliases?: readonly string[];
+  readonly requires?: readonly CardType[];
   /** subagent only; canonical `<type>/<name>` card IDs */
-  uses?: string[];
+  readonly uses?: readonly string[];
   /** review/methodology only */
-  subagents?: string[];
+  readonly subagents?: readonly string[];
 }
 
 export interface Card {
-  id: CardId;
+  readonly id: CardId;
   /** Absolute dir path: <root>/brain/<type>/<name>/ */
-  dirPath: string;
+  readonly dirPath: string;
   /** Absolute path to CORE.md */
-  corePath: string;
-  frontmatter: CardFrontmatter;
-  body: string;
+  readonly corePath: string;
+  readonly frontmatter: CardFrontmatter;
+  readonly body: string;
   /** Root-relative paths to references/*.md */
-  references: string[];
+  readonly references: readonly string[];
   /** Root-relative paths to validators/*.ts (review/methodology only) */
-  validators: string[];
+  readonly validators: readonly string[];
 }
 
 export interface Protocol extends Card {
   /** Root-relative path to schema.json */
-  schemaPath: string;
+  readonly schemaPath: string;
   /** Root-relative path to validator.ts */
-  validatorPath: string;
+  readonly validatorPath: string;
   /** Root-relative paths to examples/valid/*.json */
-  validExamples: string[];
+  readonly validExamples: readonly string[];
   /** Root-relative paths to examples/invalid/*.json */
-  invalidExamples: string[];
+  readonly invalidExamples: readonly string[];
 }
 
 export interface ResolvedSlot {
-  type: CardType;
-  fillerCard: string;
+  readonly type: CardType;
+  readonly fillerCard: string;
   /** Alphabetical names of all candidates */
-  candidates: string[];
+  readonly candidates: readonly string[];
 }
 
 export interface FilledSlot {
   /** Root-relative path */
-  core: string;
+  readonly core: string;
   /** Root-relative paths */
-  references: string[];
+  readonly references: readonly string[];
 }
 
 /** Index a card list by `<type>/<name>` for O(1) lookup. */
-export function cardIndex(cards: Card[]): Map<string, Card> {
-  return new Map(cards.map((c) => [cardKey(c.id), c] as const));
+export function cardIndex(cards: readonly Card[]): ReadonlyMap<string, Card> {
+  return new ImmutableMap(cards.map((c) => [cardKey(c.id), c] as const));
 }
 
 export interface Manifest {
   /** Absolute path of the marketplace dir. All other paths are relative to this. */
-  root: string;
-  modules: Array<CardId & { core: string }>;
+  readonly root: string;
+  readonly modules: readonly (CardId & { readonly core: string })[];
   /** Root-relative paths from non-filler cards */
-  core: string[];
+  readonly core: readonly string[];
   /** Root-relative paths from non-filler cards */
-  references: string[];
-  filled: Record<CardType, FilledSlot>;
-  slots: ResolvedSlot[];
+  readonly references: readonly string[];
+  readonly filled: Readonly<Record<CardType, FilledSlot>>;
+  readonly slots: readonly ResolvedSlot[];
   /** Root-relative paths to brain/subagent/<name>/CORE.md */
-  subagents: string[];
+  readonly subagents: readonly string[];
   /** Root-relative paths to review/methodology card validators */
-  validators: string[];
-  warnings: string[];
+  readonly validators: readonly string[];
+  readonly warnings: readonly string[];
 }
