@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { runAdd, scaffoldCard } from "../src/commands/add.ts";
+import { knownTypesFromCards } from "../src/composition/index.ts";
 import { loadAllCards } from "../src/lib/catalog.ts";
-import { knownTypesFromCards } from "../src/lib/compose.ts";
 import { parseCore } from "../src/lib/frontmatter.ts";
 
 const FIXTURE_BRAIN = join(import.meta.dir, "fixtures", "brain");

@@ -3,16 +3,16 @@ import type { CardId } from "./types.ts";
 export const MIN_QUERY_LENGTH = 3;
 
 export interface FuzzyCandidate {
-  id: CardId;
+  readonly id: CardId;
   /** Either the canonical name or one of its aliases. */
-  matchedOn: string;
+  readonly matchedOn: string;
 }
 
 /** Search-space entry: every card name + every alias on every card. */
 export interface FuzzyEntry {
-  id: CardId;
+  readonly id: CardId;
   /** Canonical name + every alias, lowercased once for matching. */
-  haystacks: string[];
+  readonly haystacks: readonly string[];
 }
 
 /**
@@ -20,8 +20,11 @@ export interface FuzzyEntry {
  * Levenshtein within distance 2. The first non-empty tier wins; ties WITHIN a
  * tier surface as multiple candidates (caller decides ambiguity policy).
  */
-export function fuzzyMatch(entries: FuzzyEntry[], query: string): FuzzyCandidate[] {
-  if (query.length < MIN_QUERY_LENGTH) return [];
+export function fuzzyMatch(
+  entries: readonly FuzzyEntry[],
+  query: string
+): readonly FuzzyCandidate[] {
+  if (query.length < MIN_QUERY_LENGTH) return Object.freeze([]);
   const q = query.toLowerCase();
 
   const exact: FuzzyCandidate[] = [];
@@ -51,7 +54,7 @@ export function fuzzyMatch(entries: FuzzyEntry[], query: string): FuzzyCandidate
       }
     }
     if (!best) continue;
-    const cand = { id: entry.id, matchedOn: best.haystack };
+    const cand = Object.freeze({ id: entry.id, matchedOn: best.haystack });
     switch (best.tier) {
       case 0:
         exact.push(cand);
@@ -63,19 +66,21 @@ export function fuzzyMatch(entries: FuzzyEntry[], query: string): FuzzyCandidate
         substring.push(cand);
         break;
       case 3:
-        lev.push({ ...cand, dist: best.dist });
+        lev.push(Object.freeze({ ...cand, dist: best.dist }));
         break;
     }
   }
 
-  if (exact.length > 0) return exact;
-  if (prefix.length > 0) return prefix;
-  if (substring.length > 0) return substring;
-  if (lev.length === 0) return [];
+  if (exact.length > 0) return Object.freeze(exact);
+  if (prefix.length > 0) return Object.freeze(prefix);
+  if (substring.length > 0) return Object.freeze(substring);
+  if (lev.length === 0) return Object.freeze([]);
   const minDist = Math.min(...lev.map((c) => c.dist));
-  return lev
-    .filter((c) => c.dist === minDist)
-    .map(({ id, matchedOn }) => ({ id, matchedOn }));
+  return Object.freeze(
+    lev
+      .filter((candidate) => candidate.dist === minDist)
+      .map(({ id, matchedOn }) => Object.freeze({ id, matchedOn }))
+  );
 }
 
 /** Standard iterative Levenshtein. Used only for tier-3 fallback. */

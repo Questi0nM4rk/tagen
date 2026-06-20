@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { CommandResult } from "../src/cli/result.ts";
 import { runGet } from "../src/commands/get.ts";
+import { type ComposeQuery, emptyQuery } from "../src/composition/index.ts";
 import { loadAllCards, marketplaceRoot } from "../src/lib/catalog.ts";
-import { type ComposeQuery, emptyQuery } from "../src/lib/compose.ts";
 import { captureStderr, captureStdout } from "./helpers/capture.ts";
 
 const BRAIN = join(import.meta.dir, "fixtures", "brain");
@@ -14,49 +15,6 @@ function q(
   overrides: Partial<ComposeQuery> = {}
 ): ComposeQuery {
   return { ...emptyQuery(), positional, ...overrides };
-}
-
-const ORIGINAL_EXIT = process.exit;
-const ORIGINAL_STDERR = process.stderr.write.bind(process.stderr);
-const ORIGINAL_STDOUT = process.stdout.write.bind(process.stdout);
-
-interface ExitCapture {
-  exitCode: number | undefined;
-  stderr: string;
-  stdout: string;
-}
-
-/** Run fn() while stubbing process.exit, stderr, and stdout. Survives the
- * exit-throw and returns whatever was written before exit was called. */
-function withExitCapture(fn: () => void): ExitCapture {
-  const stderrChunks: string[] = [];
-  const stdoutChunks: string[] = [];
-  let exitCode: number | undefined;
-
-  process.exit = ((code?: number) => {
-    exitCode = code ?? 0;
-    throw new Error("__exit__");
-  }) as never;
-  process.stderr.write = ((c: string | Uint8Array) => {
-    stderrChunks.push(typeof c === "string" ? c : Buffer.from(c).toString("utf8"));
-    return true;
-  }) as typeof process.stderr.write;
-  process.stdout.write = ((c: string | Uint8Array) => {
-    stdoutChunks.push(typeof c === "string" ? c : Buffer.from(c).toString("utf8"));
-    return true;
-  }) as typeof process.stdout.write;
-
-  try {
-    fn();
-  } catch (err) {
-    if (!(err instanceof Error && err.message === "__exit__")) throw err;
-  } finally {
-    process.exit = ORIGINAL_EXIT;
-    process.stderr.write = ORIGINAL_STDERR;
-    process.stdout.write = ORIGINAL_STDOUT;
-  }
-
-  return { exitCode, stderr: stderrChunks.join(""), stdout: stdoutChunks.join("") };
 }
 
 describe("runGet — JSON manifest", () => {
@@ -111,18 +69,20 @@ describe("runGet — browse intent", () => {
 
 describe("runGet — exit codes", () => {
   test("empty match exits 2", () => {
-    const { exitCode, stderr } = withExitCapture(() =>
-      runGet(cards, ROOT, q([]), { json: true })
-    );
-    expect(exitCode).toBe(2);
+    let result = CommandResult.SUCCESS;
+    const stderr = captureStderr(() => {
+      result = runGet(cards, ROOT, q([]), { json: true });
+    });
+    expect(result.exitCode).toBe(2);
     expect(stderr).toContain("no cards matched");
   });
 
   test("ambiguous arg exits 1", () => {
-    const { exitCode, stderr } = withExitCapture(() =>
-      runGet(cards, ROOT, q(["dot"]), { json: true })
-    );
-    expect(exitCode).toBe(1);
+    let result = CommandResult.SUCCESS;
+    const stderr = captureStderr(() => {
+      result = runGet(cards, ROOT, q(["dot"]), { json: true });
+    });
+    expect(result.exitCode).toBe(1);
     expect(stderr).toContain("ambiguous arg");
   });
 });

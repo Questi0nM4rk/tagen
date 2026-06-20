@@ -1,5 +1,9 @@
 # Review Hardening and Typed Command Descriptors
 
+> Historical plan. Superseded on 2026-06-20 by the class-owned command and
+> parameter architecture documented in `CLAUDE.md`. The hardening findings
+> remain relevant; the "no classes" implementation constraint does not.
+
 ## Current State
 
 - Branch: `fix/review-hardening`

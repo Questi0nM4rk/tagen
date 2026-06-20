@@ -1,7 +1,13 @@
-import { valueFlag } from "./command.ts";
+import { ValueParameter } from "./parameter.ts";
 
-export const ROOT_FLAG = valueFlag(
-  "--root",
-  "--root <dir>",
-  "Resolve brain at <dir>/brain instead of walking up from cwd"
-);
+export class RootParameter extends ValueParameter<"--root"> {
+  constructor() {
+    super(
+      "--root",
+      "--root <dir>",
+      "Resolve brain at <dir>/brain instead of walking up from cwd"
+    );
+  }
+}
+
+export const ROOT_PARAMETER = Object.freeze(new RootParameter());
