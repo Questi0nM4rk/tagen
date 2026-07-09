@@ -38,9 +38,9 @@ export interface ValidationContext {
 }
 
 /**
- * Walk every rule, print every violation, never fast-fail. Exits 0 on a clean
- * tree, 1 on any violation. Caller resolves `cards`/`protocols`/`knownTypes`
- * via the catalog loader.
+ * Walk every rule, print every violation, never fast-fail. Returns success
+ * on a clean tree, failure on any violation. Caller resolves the
+ * `ValidationContext` fields via the catalog loader.
  */
 export function runValidate(
   ctx: ValidationContext,
@@ -80,6 +80,10 @@ export class ValidateCommand extends Command<"validate", ValidateOptions> {
 
 export const validateCommand = Object.freeze(new ValidateCommand());
 
+/**
+ * Aggregate all catalog violations: catalog-shape errors, card validation,
+ * self-containment, protocol schemas, and harness neutrality.
+ */
 export function validateCatalog(ctx: ValidationContext): readonly string[] {
   return Object.freeze([
     ...ctx.catalogErrors,

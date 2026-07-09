@@ -158,7 +158,7 @@ Never claim done if `bun test`, `bun run typecheck`, or `bun run lint` haven't b
 ## Adding a Command
 
 1. Create `src/commands/<name>.ts`
-2. Export `run<Name>(args): Promise<void> | void` and a `Command` subclass
+2. Export `run<Name>(...)` and a `Command` subclass
 3. Define each accepted flag/option/positional as its own parameter class
 4. Add one immutable command instance to `src/commands/index.ts`
 5. Add `__tests__/<name>.test.ts`

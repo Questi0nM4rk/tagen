@@ -10,6 +10,10 @@ import {
   KEBAB_NAME,
 } from "../lib/types.ts";
 
+/**
+ * Runs all card-level validation checks (filesystem, frontmatter, requires,
+ * uses, subagents, validators, aliases, cycles) and returns the violations.
+ */
 export function validateCards(
   cards: readonly Card[],
   frontmatterErrors: ReadonlyMap<string, readonly string[]>
