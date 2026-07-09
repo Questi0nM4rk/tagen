@@ -10,6 +10,10 @@ export interface CardMatch {
   readonly emptyMatch: boolean;
 }
 
+/**
+ * Match cards against a compose query using explicit IDs and fuzzy positional
+ * args. Returns matched cards, errors, browse-intent types, and empty-match flag.
+ */
 export function matchCards(
   cards: readonly Card[],
   query: ComposeQuery,

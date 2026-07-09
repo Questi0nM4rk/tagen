@@ -5,6 +5,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import { errorMessage } from "../lib/errors.ts";
 import type { Protocol } from "../lib/types.ts";
 
+/** Validate all protocol cards: schema shape, validator executability, and example payloads. */
 export function validateProtocols(
   protocols: readonly Protocol[],
   root: string

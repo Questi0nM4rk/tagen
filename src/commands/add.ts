@@ -62,6 +62,9 @@ export interface ScaffoldArgs {
   readonly subagents: readonly string[];
 }
 
+/**
+ * Builds the CORE.md file content (frontmatter + body) from scaffold arguments.
+ */
 export function scaffoldCard(a: ScaffoldArgs): string {
   const frontmatter: CardFrontmatter = {
     description: a.description,

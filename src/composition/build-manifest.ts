@@ -8,6 +8,10 @@ import {
 } from "../lib/types.ts";
 import type { SlotResolution } from "./resolve-slots.ts";
 
+/**
+ * Builds an immutable manifest from composed cards, resolved slots,
+ * and subagent paths.
+ */
 export function buildManifest(
   cards: readonly Card[],
   catalog: readonly Card[],

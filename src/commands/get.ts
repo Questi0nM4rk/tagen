@@ -114,6 +114,10 @@ export function runGet(
   return CommandResult.SUCCESS;
 }
 
+/**
+ * Build an immutable ComposeQuery from parsed CLI arguments.
+ * Fails on unpaired --type/--name and malformed --pin syntax.
+ */
 export function buildComposeQuery(args: ParsedCommandArgs): ComposeQuery {
   const explicit: CardId[] = [];
   const pins = new Map<string, string>();

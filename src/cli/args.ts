@@ -7,6 +7,8 @@ import {
   ValueParameter,
 } from "./parameter.ts";
 
+const EMPTY_FROZEN: readonly string[] = Object.freeze([]);
+
 export class ParsedCommandArgs {
   readonly positional: readonly string[];
   readonly #values: ReadonlyMap<CommandParameter, readonly string[]>;
@@ -31,7 +33,7 @@ export class ParsedCommandArgs {
   values<Name extends string>(
     parameter: RepeatableValueParameter<Name>
   ): readonly string[] {
-    return this.#values.get(parameter) ?? [];
+    return this.#values.get(parameter) ?? EMPTY_FROZEN;
   }
 
   has<Name extends string>(parameter: BooleanParameter<Name>): boolean {
