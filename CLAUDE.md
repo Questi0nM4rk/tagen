@@ -83,7 +83,8 @@ src/
 ├── validation/
 │   ├── card-validator.ts   # card shape, references, aliases, uses
 │   ├── harness-validator.ts # harness-neutral content policy
-│   └── protocol-validator.ts # schemas, validators, protocol examples
+│   ├── protocol-validator.ts # schemas, validators, protocol examples
+│   └── self-contained-validator.ts # no inline brain/<type>/<name> paths in card bodies
 ├── main.ts                 # globals, lookup, catalog policy, command execution
 └── validator-runtime.ts    # @questi0nm4rk/tagen/validator-runtime export
 ```

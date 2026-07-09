@@ -78,7 +78,10 @@ ship `validators/` (executable scripts) plus a `lib/` for shared modules.
 
 `tagen validate` also rejects harness-specific model names, lifecycle events,
 paths, and commands under `brain/`. Narrow, checked-in exceptions and
-project-specific terms live in `.tagen/agnostic-guard.json`.
+project-specific terms live in `.tagen/agnostic-guard.json`. It further
+enforces self-containment: a card body (`CORE.md` or `references/*.md`) must
+never reference another card's `brain/<type>/<name>` path — cross-card
+composition is declared in `uses:`/`requires:` frontmatter.
 
 See [docs/specs/SPEC-tagen.md](docs/specs/SPEC-tagen.md) for the full spec
 and [docs/tagen-get-manifest.schema.json](docs/tagen-get-manifest.schema.json)

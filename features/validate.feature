@@ -13,6 +13,14 @@ Feature: tagen validate — every rule, every violation, never fast-fails
     And stderr contains "scanned"
     And stderr contains "violation(s)"
 
+  Scenario: inline brain path fails validation
+    Given a temporary brain dir copied from the canonical fixture
+    And a card contains an inline brain path
+    When I run tagen with args validate
+    Then it exits 1
+    And stderr contains "inline brain path"
+    And stderr contains "cards must be self-contained"
+
   Scenario: harness-specific content fails validation
     Given a temporary brain dir copied from the canonical fixture
     And a card contains harness-specific content

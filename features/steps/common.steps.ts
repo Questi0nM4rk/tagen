@@ -52,6 +52,13 @@ Given<TaGenWorld>("a card contains harness-specific content", (world: TaGenWorld
   );
 });
 
+Given<TaGenWorld>("a card contains an inline brain path", (world: TaGenWorld) => {
+  writeFileSync(
+    join(world.cwd, "brain", "subagent", "security-reviewer", "CORE.md"),
+    `---\ndescription: "x"\n---\n# x\n\nSee brain/methodology/tdd for the loop.\n`
+  );
+});
+
 // ─── When ─────────────────────────────────────────────────────────────────────
 
 When<TaGenWorld>(
