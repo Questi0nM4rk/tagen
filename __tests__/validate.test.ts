@@ -223,6 +223,59 @@ describe("runValidate — broken cards", () => {
     }
   });
 
+  test("inline brain path in CORE.md body breaks self-containment", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      writeFileSync(
+        join(b, "methodology", "tdd", "CORE.md"),
+        `---\ndescription: "x"\nrequires: [lang]\n---\n# x\n\nSee brain/lang/csharp for patterns.\n`
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        'brain/methodology/tdd/CORE.md:7: inline brain path "brain/lang/csharp"'
+      );
+      expect(stderr).toContain("cards must be self-contained");
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("inline brain path in a references file breaks self-containment", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      writeFileSync(
+        join(b, "methodology", "tdd", "references", "cycle.md"),
+        "# Cycle\n\nCompose with brain/review/strict/CORE.md always.\n"
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        'brain/methodology/tdd/references/cycle.md:3: inline brain path "brain/review/strict/CORE'
+      );
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("own-card references/ paths keep self-containment", () => {
+    const { brainDir, tearDown } = cloneFixture((b) => {
+      writeFileSync(
+        join(b, "methodology", "tdd", "CORE.md"),
+        `---\ndescription: "x"\nrequires: [lang]\n---\n# x\n\nRead references/cycle.md next.\n`
+      );
+    });
+    try {
+      const { stderr, exitCode } = runAndCapture(brainDir);
+      expect(exitCode).toBe(0);
+      expect(stderr).toBe("");
+    } finally {
+      tearDown();
+    }
+  });
+
   test("harness-specific content reports file line rule and token", () => {
     const { brainDir, tearDown } = cloneFixture((b) => {
       writeFileSync(

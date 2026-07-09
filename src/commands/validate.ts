@@ -12,6 +12,7 @@ import type { Card, Protocol } from "../lib/types.ts";
 import { validateCards } from "../validation/card-validator.ts";
 import { validateHarnessNeutrality } from "../validation/harness-validator.ts";
 import { validateProtocols } from "../validation/protocol-validator.ts";
+import { validateSelfContainment } from "../validation/self-contained-validator.ts";
 
 class VerboseParameter extends BooleanParameter<"--verbose"> {
   constructor() {
@@ -83,6 +84,7 @@ export function validateCatalog(ctx: ValidationContext): readonly string[] {
   return Object.freeze([
     ...ctx.catalogErrors,
     ...validateCards(ctx.cards, ctx.frontmatterErrors),
+    ...validateSelfContainment(ctx.cards, ctx.root),
     ...validateProtocols(ctx.protocols, ctx.root),
     ...validateHarnessNeutrality(ctx.root),
   ]);

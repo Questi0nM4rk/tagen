@@ -398,6 +398,18 @@ The manifest schema lives at `docs/tagen-get-manifest.schema.json` and is enforc
 | Alias matches a canonical name | `<alias>: collides with canonical name <type>/<name>` |
 | Alias is not a string | `<card>: aliases must be an array of strings` |
 
+### Self-containment rules
+
+Card bodies (`CORE.md` and `references/*.md`) must never reference another
+card's path. Cross-card composition is declared in `uses:`/`requires:`
+frontmatter and resolved at query time; own-card files use relative
+`references/...` paths. ANY inline `brain/<type>/<name>` path in a body is a
+violation.
+
+| Rule | Error |
+|------|-------|
+| Inline `brain/<type>/<name>` path in a card body | `<path>:<line>: inline brain path "<token>": cards must be self-contained; use uses:/requires: or local references/ paths` |
+
 ### Harness-neutrality rules
 
 `tagen validate` scans card Markdown, references, protocol JSON, examples, and
