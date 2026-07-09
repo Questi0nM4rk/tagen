@@ -9,6 +9,10 @@ import { resolveSlots } from "./resolve-slots.ts";
 
 export type { ComposeOutcome, ComposeQuery } from "./contracts.ts";
 
+/**
+ * Return an immutable ComposeQuery with no positional args, explicit
+ * selections, or pins.
+ */
 export function emptyQuery(): ComposeQuery {
   return Object.freeze({
     positional: Object.freeze([]),
@@ -80,6 +84,9 @@ function outcome(value: ComposeOutcome): ComposeOutcome {
   });
 }
 
+/**
+ * Derive the set of known card types from the catalog.
+ */
 export function knownTypesFromCards(cards: readonly Card[]): ReadonlySet<CardType> {
   return new ImmutableSet(cards.map((card) => card.id.type));
 }

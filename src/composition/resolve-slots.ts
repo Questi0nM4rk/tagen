@@ -12,6 +12,10 @@ export interface SlotResolution {
   readonly fillerKeys: ReadonlySet<string>;
 }
 
+/**
+ * Resolves filler cards for all required types, applying pin overrides
+ * and collecting warnings for unfilled or ambiguous slots.
+ */
 export function resolveSlots(
   cards: readonly Card[],
   root: string,
