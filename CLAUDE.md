@@ -16,6 +16,7 @@ Spec: `docs/specs/SPEC-tagen.md`. Manifest contract: `docs/tagen-get-manifest.sc
 | Command | Description |
 |---------|-------------|
 | `tagen list` | List catalog cards as `<type>/<name>`. Flags: `--type T`, `--aliases`, `--json` |
+| `tagen search` | Full-text fuzzy search across card content, card-ranked. Flags: `--type T`, `--json` |
 | `tagen validate` | Walk the tree, report every rule violation, non-zero exit on any |
 | `tagen get` | Resolve a composition into a JSON manifest (`--json`). Bare type-name args trigger browse intent |
 | `tagen add` | Interactive scaffold for a new card (the only writer) |
@@ -62,6 +63,7 @@ src/
 │   ├── add.ts              # tagen add (interactive scaffold; only writer)
 │   ├── get.ts              # tagen get
 │   ├── list.ts             # tagen list
+│   ├── search.ts           # tagen search
 │   └── validate.ts         # tagen validate
 ├── composition/
 │   ├── index.ts            # composition orchestration + public API
@@ -70,6 +72,10 @@ src/
 │   ├── resolve-slots.ts    # requires-slot candidates, pins, fillers
 │   ├── build-manifest.ts   # immutable manifest assembly
 │   └── card-order.ts       # deterministic card ordering
+├── search/
+│   ├── index.ts            # searchCards() orchestration + ranking + public API
+│   ├── contracts.ts        # SearchQuery value object + result contracts
+│   └── match.ts            # pure word/token matching (substring + Levenshtein ≤ 1)
 ├── lib/
 │   ├── types.ts            # Card, CardFrontmatter, Manifest, …
 │   ├── catalog.ts          # findBrainDir(), loadAllCards(), marketplaceRoot()
@@ -107,6 +113,7 @@ __tests__/
 ├── fuzzy.test.ts           # tier ordering, 3-char min, ambiguity
 ├── compose.test.ts         # resolution algorithm end-to-end
 ├── list.test.ts            # text + JSON output, --type, --aliases
+├── search.test.ts          # tokenizing, matching, ranking, text/JSON output, cap
 ├── validate.test.ts        # clean fixture passes; broken-fixture clones per rule class
 ├── get.test.ts             # manifest + browse intent + exit codes
 ├── add.test.ts             # scaffoldCard frontmatter shape + interactive scaffold
@@ -129,6 +136,7 @@ running. No real marketplace dependency.
 ```
 features/
 ├── list.feature
+├── search.feature
 ├── validate.feature
 ├── get.feature
 ├── add.feature             # CLI shape only — interactive flow covered by add.test.ts

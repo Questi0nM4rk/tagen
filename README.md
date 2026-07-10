@@ -31,6 +31,7 @@ npm install -g @questi0nm4rk/tagen
 |---------|---------|-------------|
 | `list` | `tagen list` | List every card as `<type>/<name>` |
 | `list` | `tagen list --type lang --aliases` | Filter to one type, show aliases |
+| `search` | `tagen search worktree isolation` | Full-text fuzzy search across card content, ranked by distinct query tokens matched |
 | `validate` | `tagen validate` | Walk the tree, report every rule violation; exit non-zero on any |
 | `get` | `tagen get strict csharp --json` | Resolve a composition into a JSON manifest |
 | `get` | `tagen get methodology` | Bare type-name positional triggers browse intent |

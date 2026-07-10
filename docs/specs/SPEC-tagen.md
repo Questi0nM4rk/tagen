@@ -158,7 +158,7 @@ Five fields total: `description`, `aliases`, `requires`, `uses`, `subagents`. `u
 
 ## Commands
 
-Four commands. All read-only except `tagen add`.
+Five commands. All read-only except `tagen add`.
 
 ### `tagen get <args>`
 
@@ -191,6 +191,37 @@ tagen list [--type T] [--aliases] [--json] [--root <dir>]
 - `--root <dir>`: resolve `<dir>/brain` exactly instead of walking up from cwd.
 
 Exit codes: 0 (success), 1 (validation error reading the tree).
+
+### `tagen search <query...>`
+
+Full-text fuzzy search across all card content, card-ranked. Searches every
+card body file — `CORE.md` + `references/*.md` of every card (protocol cards
+included) — skipping frontmatter blocks (body text only).
+
+```
+tagen search <query...> [--type T] [--json] [--root <dir>]
+```
+
+- `query` (positional, repeatable, required): tokenized on whitespace and
+  lowercased. A document word matches a query token when the token is a
+  case-insensitive substring of the word, OR the word is within Levenshtein
+  distance 1 of the token (tokens of length ≥ 4 only — edit distance on tiny
+  tokens is all noise).
+- **Ranking:** hits are grouped by card. Primary: number of distinct query
+  tokens matched (desc). Secondary: total match count (desc). Tertiary:
+  `<type>/<name>` alphabetical (determinism).
+- **Text output** (default): aligned columns
+  `<type>/<name>  <distinct>/<tokens> tokens  <total> match(es)  <best file>`
+  where best file is the card-relative file with the most hits. Capped at the
+  top 20 cards; prints `… and N more.` when capped. Footer with result count.
+- `--json`: uncapped array of
+  `{type, name, tokensMatched, tokensTotal, matches, files: [{path, matches}]}`
+  sorted the same — enough for an agent to pick a card and `tagen get <name>`.
+- `--type T`: restrict the search to one card type.
+- `--root <dir>`: resolve `<dir>/brain` exactly instead of walking up from cwd.
+
+Exit codes: 0 (results found), 1 (no matches or validation error — agents
+branch on it).
 
 ### `tagen validate`
 

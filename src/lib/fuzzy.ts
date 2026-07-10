@@ -83,8 +83,9 @@ export function fuzzyMatch(
   );
 }
 
-/** Standard iterative Levenshtein. Used only for tier-3 fallback. */
-function levenshtein(a: string, b: string): number {
+/** Standard iterative Levenshtein. Tier-3 fallback here; word-level typo
+ * tolerance in `search/match.ts`. The single edit-distance implementation. */
+export function levenshtein(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
   if (m === 0) return n;

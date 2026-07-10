@@ -1,11 +1,13 @@
 import { addCommand } from "./add.ts";
 import { getCommand } from "./get.ts";
 import { listCommand } from "./list.ts";
+import { searchCommand } from "./search.ts";
 import { validateCommand } from "./validate.ts";
 
 const COMMANDS = Object.freeze([
   validateCommand,
   listCommand,
+  searchCommand,
   getCommand,
   addCommand,
 ] as const);

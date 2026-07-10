@@ -107,6 +107,14 @@ Then<TaGenWorld>(
   }
 );
 
+Then<TaGenWorld>(
+  "the first stdout line contains {string}",
+  (world: TaGenWorld, needle: unknown) => {
+    const firstLine = (world.result?.stdout ?? "").split("\n")[0] ?? "";
+    expect(firstLine).toContain(String(needle));
+  }
+);
+
 // ─── Then — JSON shape ───────────────────────────────────────────────────────
 
 Then<TaGenWorld>("stdout is valid JSON", (world: TaGenWorld) => {
@@ -121,6 +129,21 @@ Then<TaGenWorld>(
       name: string;
     }>;
     expect(parsed.find((e) => e.type === "lang" && e.name === "csharp")).toBeDefined();
+  }
+);
+
+Then<TaGenWorld>(
+  "the first JSON search result is lang\\/csharp with every result field",
+  (world: TaGenWorld) => {
+    const parsed = JSON.parse(world.result?.stdout ?? "[]") as Array<
+      Record<string, unknown>
+    >;
+    const first = parsed[0];
+    expect(first?.type).toBe("lang");
+    expect(first?.name).toBe("csharp");
+    for (const field of ["tokensMatched", "tokensTotal", "matches", "files"]) {
+      expect(first).toHaveProperty(field);
+    }
   }
 );
 
