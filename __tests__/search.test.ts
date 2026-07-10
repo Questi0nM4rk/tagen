@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { chmodSync, cpSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSearch, TEXT_RESULT_CAP } from "../src/commands/search.ts";
 import { loadAllCards, marketplaceRoot } from "../src/lib/catalog.ts";
@@ -23,6 +25,50 @@ function syntheticCard(type: string, name: string, body: string): Card {
     validators: Object.freeze([]),
   });
 }
+
+describe("CLI rejects whitespace-only queries cleanly", () => {
+  test("search '   ' fails with the query-term message, not an uncaught throw", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", join(import.meta.dir, "..", "src", "main.ts"), "search", "   "],
+      {
+        cwd: join(import.meta.dir, ".."),
+        stdout: "pipe",
+        stderr: "pipe",
+      }
+    );
+    const [exitCode, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stderr).text(),
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("at least one query term");
+    expect(stderr).not.toContain("must contain at least one token"); // the uncaught SearchQuery throw
+  });
+});
+
+describe("searchCards skips unreadable reference files", () => {
+  test("a reference with no read permission is skipped; other documents still score", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tagen-search-"));
+    try {
+      cpSync(BRAIN, join(dir, "brain"), { recursive: true });
+      const { cards: cloned } = loadAllCards(join(dir, "brain"));
+      const withRef = cloned.find((c) => c.references.length > 0);
+      if (!withRef) throw new Error("fixture must contain a card with references");
+      chmodSync(join(dir, withRef.references[0] as string), 0o000);
+      const results = searchCards(cloned, dir, new SearchQuery(["review"]));
+      expect(results.length).toBeGreaterThan(0); // no throw, other docs scored
+      const hit = results.find(
+        (r) => r.id.type === withRef.id.type && r.id.name === withRef.id.name
+      );
+      if (hit) {
+        const refName = (withRef.references[0] as string).split("/").pop() as string;
+        expect(hit.files.some((f) => f.path.endsWith(refName))).toBe(false);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("SearchQuery", () => {
   test("lowercases, splits on whitespace, and dedupes tokens", () => {

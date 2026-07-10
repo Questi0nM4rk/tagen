@@ -34,9 +34,15 @@ function cardDocuments(card: Card, root: string): readonly CardDocument[] {
   const documents: CardDocument[] = [{ path: CORE_FILE, text: card.body }];
   for (const reference of card.references) {
     const absPath = join(root, reference);
+    let text: string;
+    try {
+      text = stripFrontmatter(readFileSync(absPath, "utf8"));
+    } catch {
+      continue; // deleted/unreadable reference: skip the file, keep scoring the card
+    }
     documents.push({
       path: relative(card.dirPath, absPath).split(sep).join("/"),
-      text: stripFrontmatter(readFileSync(absPath, "utf8")),
+      text,
     });
   }
   return documents;

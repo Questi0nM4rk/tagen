@@ -25,10 +25,10 @@ class JsonParameter extends BooleanParameter<"--json"> {
   }
 }
 
-/** `search` is meaningless without a query — require ≥1 positional term. */
+/** `search` is meaningless without a query — require ≥1 non-blank positional term. */
 class QueryTermsPolicy extends PositionalArgumentsPolicy {
   validate(commandName: string, values: readonly string[]): void {
-    if (values.length === 0) {
+    if (values.every((value) => value.trim() === "")) {
       fail(`'${commandName}' requires at least one query term`);
     }
   }
