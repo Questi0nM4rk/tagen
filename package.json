@@ -1,6 +1,6 @@
 {
   "name": "@questi0nm4rk/tagen",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Harness-agnostic context graph CLI for composable brain cards",
   "keywords": [
     "agent-context",

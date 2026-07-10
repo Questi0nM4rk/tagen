@@ -101,10 +101,10 @@ describe("tagen --version (issue #19)", () => {
 // ─── help shape ───────────────────────────────────────────────────────────────
 
 describe("tagen --help / -h", () => {
-  test("--help lists the four commands", async () => {
+  test("--help lists the five commands", async () => {
     const r = await runCli(["--help"]);
     expect(r.exitCode).toBe(0);
-    for (const cmd of ["validate", "list", "get", "add"]) {
+    for (const cmd of ["validate", "list", "search", "get", "add"]) {
       expect(r.stdout).toContain(cmd);
     }
   });
