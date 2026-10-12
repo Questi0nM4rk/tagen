@@ -33,11 +33,14 @@ $ tagen get strict csharp --root examples --json
 
 ## Why it exists
 
-Agents that write code or review pull requests need a different slice of guidance for each task. The options I saw were hard-coded file paths that break on every rename, loading the whole catalog every time, or describing the needed guidance in prose on each run. tagen makes the choice declarative: a card says `requires: [lang]`, and the query picks which language card fills the slot. It refuses to be a build system, a tag system or a writer of your content. It has no reason to exist if the agent harness can compose and load context like this natively.
+Agents that write code or review pull requests need a different slice of guidance for each task.
+The options I saw were hard-coded file paths that break on every rename, loading the whole catalog every time, or describing the needed guidance in prose on each run.
+tagen makes the choice declarative: a card says `requires: [lang]`, and the query picks which language card fills the slot.
+It refuses to be a build system, a tag system or a writer of your content. It has no reason to exist if the agent harness can compose and load context like this natively.
 
 ## Quickstart
 
-Requires Bun 1.3+.
+Tested with Bun 1.3.14.
 
 ```bash
 bun install
@@ -84,9 +87,9 @@ Measured 2026-10-12 on Arch Linux, Bun 1.3.14.
 | What | Value | How measured |
 | --- | --- | --- |
 | Tests | 213 pass, 0 fail | `bun test` |
-| Test time | 6.98 s | `bun test` |
+| Test time | about 7 s (6.98 to 7.30 over two runs) | `bun test` |
 | Source size | 2,664 code lines in 37 TypeScript files | `scc src` |
-| One `get` on the example brain | 0.12 s wall | `time bun src/main.ts get strict csharp --root examples` |
+| One `get` on the example brain | 0.17 s wall (median of 5 runs, 0.15 to 0.25) | `time bun src/main.ts get strict csharp --root examples` |
 
 Commits include agent-authored work under my identity; design, orchestration and review are mine.
 
@@ -94,8 +97,12 @@ Commits include agent-authored work under my identity; design, orchestration and
 
 - **Works:** `list`, `search`, `validate`, `get`, `add`. CI runs typecheck, lint and tests on every push.
 - **Experimental:** the manifest shape may change between major versions.
-- **Tried and dropped:** `build`, `diff`, `resolve`, `sync`, `demo` and `tags` commands, and the `vocabulary.yaml` and `capabilities.yaml` files. The directory tree replaced them (v2). The vendor model field on cards was removed to keep cards harness-neutral (v3).
-- **Known gaps:** slot filling picks the alphabetically first card unless pinned. There is no transitive resolution of `requires:` or `uses:`, by design. I have used tagen only with my own card catalog, so the card format is untested on others.
+- **Tried and dropped:**
+  `build`, `diff`, `resolve`, `sync`, `demo` and `tags` commands, and the `vocabulary.yaml` and `capabilities.yaml` files. The directory tree
+  replaced them (v2). The vendor model field on cards was removed to keep cards
+  harness-neutral (v3).
+- **Known gaps:** slot filling picks the alphabetically first card unless pinned. There is no transitive resolution of `requires:` or `uses:`. I have used tagen only with my own
+  card catalog, so the card format is untested on others.
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
