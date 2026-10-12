@@ -1,8 +1,9 @@
 {
   "name": "@questi0nm4rk/tagen",
   "version": "3.1.0",
-  "description": "Harness-agnostic context graph CLI for composable brain cards",
+  "description": "CLI that turns a brain/ directory of typed markdown cards into a JSON manifest of the files an agent should load for one task",
   "keywords": [
+    "claude-code",
     "agent-context",
     "context-graph",
     "harness-agnostic",

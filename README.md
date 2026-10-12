@@ -1,101 +1,104 @@
-# tagen
+<div align="center">
 
-Read-only CLI that walks a `brain/<type>/<name>/` directory tree of typed cards
-and emits a JSON composition manifest naming everything an agent should load
-for a task.
+# `tagen`
 
-[![npm version](https://img.shields.io/npm/v/%40questi0nm4rk%2Ftagen)](https://www.npmjs.com/package/@questi0nm4rk/tagen)
-[![CI](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml/badge.svg)](https://github.com/Questi0nM4rk/tagen/actions)
+**A CLI that turns a `brain/` directory of typed markdown cards into a JSON manifest of the files an agent should load for one task.**
+
+[![npm](https://img.shields.io/npm/v/%40questi0nm4rk%2Ftagen)](https://www.npmjs.com/package/@questi0nm4rk/tagen)
+[![CI](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml/badge.svg)](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Questi0nM4rk/tagen)](https://github.com/Questi0nM4rk/tagen/releases)
 
-The directory tree IS the vocabulary — no `vocabulary.yaml`, no
-`capabilities.yaml`, no `tags:` / `provides:` / `emits:` / `consumes:`.
-Five frontmatter fields total: `description`, `aliases`, `requires`, `uses`,
-`subagents`. Harness-specific model selection belongs in harness adapters.
+</div>
 
----
-
-## Install
-
-```bash
-bun add -g @questi0nm4rk/tagen
-# or
-npm install -g @questi0nm4rk/tagen
+```text
+examples/brain/
+├── lang/csharp/CORE.md      aliases: [dotnet]
+├── lang/python/CORE.md
+└── review/strict/CORE.md    requires: [lang]
 ```
 
----
-
-## Commands
-
-| Command | Example | Description |
-|---------|---------|-------------|
-| `list` | `tagen list` | List every card as `<type>/<name>` |
-| `list` | `tagen list --type lang --aliases` | Filter to one type, show aliases |
-| `search` | `tagen search worktree isolation` | Full-text fuzzy search across card content, ranked by distinct query tokens matched |
-| `validate` | `tagen validate` | Walk the tree, report every rule violation; exit non-zero on any |
-| `get` | `tagen get strict csharp --json` | Resolve a composition into a JSON manifest |
-| `get` | `tagen get methodology` | Bare type-name positional triggers browse intent |
-| `get` | `tagen get strict csharp python --pin lang=python --json` | Override alphabetical-first slot fill |
-| `add` | `tagen add` | Interactive scaffold for a new card (only writer) |
-
-All commands are read-only except `add`.
-
----
-
-## Usage as devDependency
-
-In a marketplace repo:
-
-```json
+```console
+$ tagen get strict csharp --root examples --json
 {
-  "devDependencies": {
-    "@questi0nm4rk/tagen": "latest"
-  }
+  "modules": [
+    { "type": "lang",   "name": "csharp", "core": "brain/lang/csharp/CORE.md" },
+    { "type": "review", "name": "strict", "core": "brain/review/strict/CORE.md" }
+  ],
+  "warnings": []
 }
 ```
 
+(Trimmed. The real manifest has more fields, see [the schema](docs/tagen-get-manifest.schema.json).)
+
+## Why it exists
+
+Agents that write code or review pull requests need a different slice of guidance for each task. The options I saw were hard-coded file paths that break on every rename, loading the whole catalog every time, or describing the needed guidance in prose on each run. tagen makes the choice declarative: a card says `requires: [lang]`, and the query picks which language card fills the slot. It refuses to be a build system, a tag system or a writer of your content. It has no reason to exist if the agent harness can compose and load context like this natively.
+
+## Quickstart
+
+Requires Bun 1.3+.
+
 ```bash
 bun install
-bunx tagen validate
-bunx tagen get strict csharp --json | jq .
+bun src/main.ts get strict csharp --root examples
+bun test
 ```
 
----
+Expected output of the second command:
 
-## How It Works
-
-Tagen walks up from `cwd` to find a `brain/` directory containing at least one
-`<type>/<name>/CORE.md`. No config file. Each card carries optional
-`references/` (pull-on-demand long-form), and review/methodology cards may
-ship `validators/` (executable scripts) plus a `lib/` for shared modules.
-
-`tagen get`:
-
-1. Fuzzy-matches positional args to `<type>/<name>` (3-char min; exact > prefix > substring > Levenshtein).
-2. Expands direct `uses: [<type>/<name>]` cards declared by seed subagents.
-3. Resolves `requires: [<type>]` slots over the expanded set — alphabetical first, `--pin <type>=<name>` overrides.
-4. Collects subagents declared by review/methodology cards, plus their `validators/*.ts`.
-5. Emits a JSON manifest with all paths root-relative, so the agent resolves them as `root + "/" + path`.
-
-`tagen validate` also rejects harness-specific model names, lifecycle events,
-paths, and commands under `brain/`. Narrow, checked-in exceptions and
-project-specific terms live in `.tagen/agnostic-guard.json`. It further
-enforces self-containment: a card body (`CORE.md` or `references/*.md`) must
-never reference another card's `brain/<type>/<name>` path — cross-card
-composition is declared in `uses:`/`requires:` frontmatter.
-
-See [docs/specs/SPEC-tagen.md](docs/specs/SPEC-tagen.md) for the full spec
-and [docs/tagen-get-manifest.schema.json](docs/tagen-get-manifest.schema.json)
-for the manifest contract.
-
----
-
-## Contributing
-
-Fork → branch → PR. `ai-guardrails` enforces conventional commits and blocks direct commits to main.
-
-```bash
-bun test                   # must be green
-bun run typecheck          # must be clean
-bun run lint               # must be clean
+```text
+2 card(s), 1 slot(s), 0 warning(s).
+Use --json for the full manifest.
 ```
+
+Add `--json` for the manifest. Other commands: `list`, `search`, `validate`, `add`. See
+[docs/guide.md](docs/guide.md).
+
+From npm instead of a clone: `bun add -g @questi0nm4rk/tagen`. Then run `tagen` in any directory
+that has a `brain/` directory above it.
+
+## How it works
+
+```mermaid
+flowchart LR
+  Q[query words] --> M[fuzzy match to cards]
+  T[brain/ tree] --> M
+  M --> U[expand uses:]
+  U --> S[fill requires: slots]
+  S --> J[JSON manifest of paths]
+```
+
+tagen reads the directory tree. The tree is the vocabulary: type is the parent directory, name
+is the card directory. It matches your words to cards, fills each `requires:` slot with the
+first candidate in alphabetical order (or the one you `--pin`), and prints paths. The agent
+loads the files.
+
+Everything is deterministic. No model is called, no network is used, and `get`, `list`,
+`search` and `validate` never write. Only `add` writes a card.
+
+## Numbers
+
+Measured 2026-10-12 on Arch Linux, Bun 1.3.14.
+
+| What | Value | How measured |
+| --- | --- | --- |
+| Tests | 213 pass, 0 fail | `bun test` |
+| Test time | 6.98 s | `bun test` |
+| Source size | 2,664 code lines in 37 TypeScript files | `scc src` |
+| One `get` on the example brain | 0.12 s wall | `time bun src/main.ts get strict csharp --root examples` |
+
+Commits include agent-authored work under my identity; design, orchestration and review are mine.
+
+## Status
+
+- **Works:** `list`, `search`, `validate`, `get`, `add`. CI runs typecheck, lint and tests on every push.
+- **Experimental:** the manifest shape may change between major versions.
+- **Tried and dropped:** `build`, `diff`, `resolve`, `sync`, `demo` and `tags` commands, and the `vocabulary.yaml` and `capabilities.yaml` files. The directory tree replaced them (v2). The vendor model field on cards was removed to keep cards harness-neutral (v3).
+- **Known gaps:** slot filling picks the alphabetically first card unless pinned. There is no transitive resolution of `requires:` or `uses:`, by design. I have used tagen only with my own card catalog, so the card format is untested on others.
+
+Release notes are in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+MIT
