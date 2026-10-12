@@ -4,9 +4,9 @@
 
 **A CLI that turns a `brain/` directory of typed markdown cards into a JSON manifest of the files an agent should load for one task.**
 
-[![npm](https://img.shields.io/npm/v/%40questi0nm4rk%2Ftagen)](https://www.npmjs.com/package/@questi0nm4rk/tagen)
+[![npm](https://img.shields.io/npm/v/@questi0nm4rk/tagen?color=cb3837&label=npm)](https://www.npmjs.com/package/@questi0nm4rk/tagen)
 [![CI](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml/badge.svg)](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![license](https://img.shields.io/github/license/Questi0nM4rk/tagen?color=blue)](./LICENSE)
 [![Release](https://img.shields.io/github/v/release/Questi0nM4rk/tagen)](https://github.com/Questi0nM4rk/tagen/releases)
 
 </div>
