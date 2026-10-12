@@ -6,6 +6,7 @@
 
 [![npm](https://img.shields.io/npm/v/@questi0nm4rk/tagen?color=cb3837&label=npm)](https://www.npmjs.com/package/@questi0nm4rk/tagen)
 [![CI](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml/badge.svg)](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml)
+[![tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Questi0nM4rk/tagen/badges/tests.json&style=flat-square)](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml)
 [![license](https://img.shields.io/github/license/Questi0nM4rk/tagen?color=blue)](./LICENSE)
 [![Release](https://img.shields.io/github/v/release/Questi0nM4rk/tagen)](https://github.com/Questi0nM4rk/tagen/releases)
 
@@ -40,8 +41,6 @@ It refuses to be a build system, a tag system or a writer of your content. It ha
 
 ## Quickstart
 
-Tested with Bun 1.3.14.
-
 ```bash
 bun install
 bun src/main.ts get strict csharp --root examples
@@ -51,7 +50,7 @@ bun test
 Expected output of the second command:
 
 ```text
-2 card(s), 1 slot(s), 0 warning(s).
+N card(s), N slot(s), 0 warning(s).
 Use --json for the full manifest.
 ```
 
@@ -82,14 +81,14 @@ Everything is deterministic. No model is called, no network is used, and `get`, 
 
 ## Numbers
 
-Measured 2026-10-12 on Arch Linux, Bun 1.3.14.
+[![tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Questi0nM4rk/tagen/badges/tests.json&style=flat-square)](https://github.com/Questi0nM4rk/tagen/actions/workflows/ci.yml)
 
-| What | Value | How measured |
-| --- | --- | --- |
-| Tests | 213 pass, 0 fail | `bun test` |
-| Test time | about 7 s (6.98 to 7.30 over two runs) | `bun test` |
-| Source size | 2,664 code lines in 37 TypeScript files | `scc src` |
-| One `get` on the example brain | 0.17 s wall (median of 5 runs, 0.15 to 0.25) | `time bun src/main.ts get strict csharp --root examples` |
+| What | How to measure |
+| --- | --- |
+| Tests | `bun test` |
+| Test time | `time bun test` |
+| Source size | `scc src` |
+| One `get` on the example brain | `time bun src/main.ts get strict csharp --root examples` |
 
 Commits include agent-authored work under my identity; design, orchestration and review are mine.
 
