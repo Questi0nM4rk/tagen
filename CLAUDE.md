@@ -253,11 +253,12 @@ docs: …
 ## Publishing
 
 ```bash
-bun run build:npm           # produces bin/tagen.js
-npm publish                 # publishes with bin/tagen.js as the tagen bin
+# bump "version" in package.json, commit, then:
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
 ```
 
-Version in `package.json` is the source of truth for npm. Bump before publishing.
+The tag starts `.github/workflows/release.yml`, which publishes to npm with trusted publishing (OIDC, no token) and creates the GitHub release. It fails when the tag and `package.json` version differ. Do not run `npm publish` by hand.
 
 ---
 
