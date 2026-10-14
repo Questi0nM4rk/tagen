@@ -34,7 +34,7 @@ jobs:
       - name: Upgrade npm
         run: npm install -g npm@^11.15.0 # npm stage needs npm 11.15.0 or newer
       - name: Stage on npm
-        run: npm stage publish --access public --provenance
+        run: npm stage publish --tag beta --access public --provenance
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
