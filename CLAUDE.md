@@ -258,7 +258,7 @@ git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The tag starts `.github/workflows/release.yml`, which stages the version in the npm stage queue with trusted publishing (OIDC, no token) and creates the GitHub release. A maintainer then approves the staged version on npmjs.com (2FA) before it is live. It fails when the tag and `package.json` version differ. Do not run `npm publish` by hand.
+The tag starts `.github/workflows/release.yml`, which stages the version in the npm stage queue with trusted publishing (OIDC, no token) and creates the GitHub release. A maintainer then approves the staged version on npmjs.com (2FA) before it is live. It fails when the tag and `package.json` version differ. Do not run `npm publish` by hand. Versions are `X.Y.Z-beta.N` under the npm dist-tag `beta`; nothing is promised in a beta.
 
 ---
 
