@@ -1,6 +1,7 @@
 name: Release
-# Publishes a v* tag to npm with trusted publishing (OIDC): no npm token.
-# npmjs.com must trust this file name (release.yml) for the package.
+# Stages a v* tag on npm with trusted publishing (OIDC): no npm token.
+# The version goes to the npm stage queue; a maintainer approves it on npmjs.com (2FA)
+# before it is live. The trusted publisher on npmjs.com names release.yml and is stage-only.
 on:
   push:
     tags:
@@ -30,8 +31,10 @@ jobs:
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
-      - name: Publish to npm
-        run: npm publish --access public --provenance
+      - name: Upgrade npm
+        run: npm install -g npm@^11.15.0 # npm stage needs 11.15.0 or newer; setup-node bundles older
+      - name: Stage on npm
+        run: npm stage publish --access public --provenance
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
